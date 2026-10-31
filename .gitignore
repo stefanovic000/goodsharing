@@ -1,0 +1,46 @@
+# Build output and vendored toolchains
+build/
+.deps/
+.tools/
+packaging/dist/
+dist/
+artifacts/
+
+# Runtime DLLs, probe objects and generated packaging files (not source)
+*.dll
+*.obj
+*.lib
+*.pdb
+*.exp
+aqtinstall.log
+version.json
+Start GoodSharing.cmd
+probe-*.json
+oracle-*.json
+temporary_sfu_benchmark.py
+
+# Qt runtime folders copied next to the exe for local runs
+generic/
+iconengines/
+imageformats/
+networkinformation/
+platforms/
+qml/
+qmltooling/
+tls/
+
+# Test output and caches
+*.log
+__pycache__/
+*.pyc
+
+# Editor / OS noise
+.vs/
+.vscode/
+*.user
+.env
+Thumbs.db
+desktop.ini
+
+# Local build binaries
+*.exe

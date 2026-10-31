@@ -1,0 +1,41 @@
+# Timed WASAPI output endpoint
+
+Date: 2026-10-22, Europe/Budapest. The bounded scheduler now has a real Windows output endpoint and an automated own-process loopback probe. **Remote sound in the normal sharing UI remains disabled.** Coordinating Qt video presentation, received network media and device playback is the next integration step.
+
+## Endpoint behavior
+
+`WasapiPlayoutSink` opens shared-mode stereo 48 kHz PCM on the default multimedia output. Construction, preparation, commits, waits, resets and destruction belong to one COM-initialized endpoint thread. It has no additional PCM FIFO. The caller owns its pumping/control lifecycle; a UI playback worker is not implemented in this increment.
+
+The device clock's position is divided by its reported frequency, rather than assumed to be an audio-frame count. Its associated QPC observation is bridged to the receiver steady clock using a fresh paired observation. Unstarted, stale, backward or invalid clock readings cannot grant a timestamped media write. The implementation follows Microsoft's [IAudioClock position/frequency contract](https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclock-getposition). This produces a software device-clock estimate, not an acoustic measurement or a claim about Bluetooth/remote-output latency.
+
+The endpoint requests 20 ms storage and supports returned buffers from 10 to 30 ms. This PC returns **22 ms (1,056 frames)** and a device-clock frequency of 192,000 units/second. The scheduler keeps its **30 ms modeled video deadline, 60 ms PCM capacity/residence and 150 ms video-clock lifetime**. The endpoint normally waits until the estimated first sample is at most **15 ms** ahead, leaving room for a fully captured 10 ms block and its output packet. Waiting applies backpressure without adding a media queue or changing the scheduler's 30 ms hard admission limit. API-reported stream latency is recorded as a diagnostic and is not blindly added to the device-clock position.
+
+A new/reset stream starts with **silence only** to establish a nonzero device-clock observation. Content is copied and released only inside `RemoteShare::presentAudio`'s final owner/SID/generation permission lease. A revoke after reservation still wins the final check. Expired reservations, clock/write-position loss and endpoint errors stop further media admission; there is no automatic reopen. A 110 ms render stall deliberately exercises this terminal path. Robust restart after a discontinuity remains future work.
+
+Reset cancels any outstanding reservation, calls Stop and Reset, and verifies zero queued padding. Microsoft documents that [Reset flushes pending stream data](https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclient-reset). This cannot recall already played audio or prove behavior after an operating-system/driver failure. Revocation still needs the endpoint owner to pump/stop; a cross-thread revoke notification and worker wakeup belong to the upcoming UI integration.
+
+## Packet-boundary repair
+
+Early real-device runs found two faults that virtual whole-block timing did not expose. First, exceeding the desired write-ahead time was incorrectly treated as an endpoint failure. It now causes a wait while the device clock advances. Second, reserving an entire 10 ms packet could extend past the latest available captured sample. Committing silence for that suffix stole the next timely block's scheduled positions and produced repeated gaps.
+
+The scheduler now returns an actual output-frame count and shortens a packet at the known PCM boundary. The endpoint cancels the original reservation and acquires exactly that smaller packet inside the final permission lease. It never releases a partially written WASAPI packet: Microsoft's [ReleaseBuffer contract](https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudiorenderclient-releasebuffer) requires a full release or zero-frame cancellation in shared mode.
+
+No receiver deadline or PCM capacity was increased to conceal the gaps. The fixture now supplies each generated capture block only after its last sample exists, retaining the first-sample timestamp. A new deterministic regression exercises ten different capture/device phases, and a final-commit test verifies the shortened span. The existing 600-second virtual-time model and its 59,987 checked blocks still pass; they remain separate from physical drift validation.
+
+## Tests and evidence
+
+The hardware probe plays quiet generated 440/880 Hz stereo tones and records only its own process through Windows process-loopback capture. A second own-process session supplies only silence so observations continue after the tested endpoint stops. It never receives content. No microphone, screen capture, unrelated application audio, network service, system audio settings or VPS is involved.
+
+The watch's encryption notifications in this probe are **synthetic permission events**. The test exercises the real final-admission/endpoint boundary; it does not perform LiveKit decryption or establish whole-app E2EE acceptance. Previous encrypted transport tests remain scoped to their recorded builds.
+
+All 20 native tests pass. Device tests cover normal stereo, mute/flush/unmute, unverified media, revocation after actual buffer reservation and a deliberate 110 ms stall after verified continuous output. Tests require at least **95% media-filled device frames** for normal/mute runs, stereo tone isolation, no commits after revoke, zero endpoint padding/reservations after stop and quiet own-process observations after an 80 ms guard. Muted PCM advances with zero output, so the media-filled fraction counts timestamped muted samples separately from audible tone evidence.
+
+The final five-case suite and four additional repeats pass on the same probe binary. Normal/mute runs achieve **99.995–100%** media-filled committed frames. The final stall run is 99.9977% before stopping; it deliberately fails closed after its 110 ms interruption. Unverified and revoke-during-reservation cases commit **zero** content packets. Final/repeat normal/mute commits take at most **30 microseconds** in these short observations; measured watch-revoke plus immediate endpoint pumping completes in at most **1.81 ms**. Those are observed software times, not hard operating-system bounds or proof of physical silence at that instant. Loopback samples after the 80 ms guard have peak magnitude one 16-bit sample count, and mute observations show the same quiet level. No project executables remain after cleanup; unrelated applications stay open.
+
+Original attempts remain recorded: a compile missing a COM declaration, a runner missing the pinned Qt search path, startup write-ahead rejection, and tone-presence passes that later failed stronger continuity checks. Earlier complete suites are not silently relabeled as continuous playback passes. Final exact results, repeat runs, hashes and retained failures are in the [validation record](../artifacts/20261022-wasapi-playout-validation.json). [Source](../artifacts/20261022-wasapi-playout-source.zip) and [binaries](../artifacts/20261022-wasapi-playout-binaries.zip) preserve the development snapshot, requiring the pinned Qt runtime.
+
+## Remaining integration
+
+The normal GUI binary is unchanged from increment 31, and capture/viewing tests from that increment are not counted as new tests here. Attach a dedicated endpoint worker to one fixed remote watch, coordinate the actual video deadline, deliver stop/revoke wakeups and test encrypted network PCM through to process-loopback. Static-picture audio and shared-track continuity through video-quality switching remain unfinished. Measure physical speaker/display synchronization and ten-minute drift before enabling remote sound in the normal UI.
+
+Device unplug/reconfiguration recovery, long real-time soak, end-to-end congestion latency, production clock bootstrap, sustained captured 60 FPS, three-share resource budgets, game coexistence, packaging and whole-app encryption/rekey/reconnect acceptance remain open. Small scheduler storage and these short device probes do not establish the full app's CPU or memory budget.

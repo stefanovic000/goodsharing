@@ -1,0 +1,162 @@
+--- a/api/crypto/frame_crypto_transformer.cc
++++ b/api/crypto/frame_crypto_transformer.cc
+@@ -168,9 +168,9 @@
+   return ss.str();
+ }
+ 
+-uint8_t get_unencrypted_bytes(webrtc::TransformableFrameInterface* frame,
++size_t get_unencrypted_bytes(webrtc::TransformableFrameInterface* frame,
+                               webrtc::FrameCryptorTransformer::MediaType type) {
+-  uint8_t unencrypted_bytes = 0;
++  size_t unencrypted_bytes = 0;
+   switch (type) {
+     case webrtc::FrameCryptorTransformer::MediaType::kAudioFrame:
+       unencrypted_bytes = 1;
+@@ -192,6 +192,7 @@
+ 
+         int idx = 0;
+         for (const auto& index : nalu_indices) {
++          if (index.payload_size == 0) continue;
+           std::span<const uint8_t> slice =
+               data_in.subspan(index.payload_start_offset);
+           webrtc::H264::NaluType nalu_type =
+@@ -218,6 +219,7 @@
+ 
+         int idx = 0;
+         for (const auto& index : nalu_indices) {
++          if (index.payload_size == 0) continue;
+           std::span<const uint8_t> slice =
+               data_in.subspan(index.payload_start_offset);
+           webrtc::H265::NaluType nalu_type =
+@@ -261,12 +263,7 @@
+     return ErrorUnexpected;
+   }
+ 
+-  RTC_LOG(LS_INFO) << "secret " << to_uint8_list(secret)
+-                   << " len " << secret.size() << " slat << "
+-                   << to_uint8_list(salt) << " len "
+-                   << salt.size() << "\n derived_key "
+-                   << to_uint8_list(derived_key)
+-                   << " len " << derived_key.size();
++  RTC_LOG(LS_VERBOSE) << "Cryptor diagnostic values redacted";
+ 
+   return Success;
+ }
+@@ -285,13 +282,7 @@
+     return ErrorUnexpected;
+   }
+ 
+-  RTC_LOG(LS_INFO) << "raw_key "
+-                   << to_uint8_list(raw_key) << " len "
+-                   << raw_key.size() << " slat << "
+-                   << to_uint8_list(salt) << " len "
+-                   << salt.size() << "\n derived_key "
+-                   << to_uint8_list(derived_key)
+-                   << " len " << derived_key.size();
++  RTC_LOG(LS_VERBOSE) << "Cryptor diagnostic values redacted";
+ 
+   return Success;
+ }
+@@ -504,7 +495,14 @@
+   }
+ 
+   auto key_set = key_handler->GetKeySet(key_index_);
+-  uint8_t unencrypted_bytes = get_unencrypted_bytes(frame.get(), type_);
++  const size_t unencrypted_bytes = get_unencrypted_bytes(frame.get(), type_);
++  if (unencrypted_bytes > data_in.size()) {
++    if (last_enc_error_ != FrameCryptionState::kEncryptionFailed) {
++      last_enc_error_ = FrameCryptionState::kEncryptionFailed;
++      onFrameCryptionStateChanged(last_enc_error_);
++    }
++    return;
++  }
+ 
+   webrtc::Buffer frame_header =
+       webrtc::Buffer::CreateUninitializedWithSize(unencrypted_bytes);
+@@ -618,10 +616,7 @@
+     auto data = std::vector<uint8_t>(tmp.begin(), tmp.end());
+     if (uncrypted_magic_bytes == data) {
+       RTC_CHECK_EQ(tmp.size(), uncrypted_magic_bytes.size());
+-      RTC_LOG(LS_INFO) << "FrameCryptorTransformer::uncrypted_magic_bytes( tmp "
+-                       << to_hex(tmp) << ", magic bytes "
+-                       << to_hex(uncrypted_magic_bytes)
+-                       << ")";
++      RTC_LOG(LS_VERBOSE) << "Cryptor diagnostic values redacted";
+ 
+       // magic bytes detected, this is a non-encrypted frame, skip frame
+       // decryption.
+@@ -634,7 +629,28 @@
+     }
+   }
+ 
+-  uint8_t unencrypted_bytes = get_unencrypted_bytes(frame.get(), type_);
++  const size_t unencrypted_bytes = get_unencrypted_bytes(frame.get(), type_);
++  // H.264/H.265 escaping covers ciphertext, IV and trailer. Normalize the
++  // complete encrypted tail BEFORE reading any trailer/IV offsets.
++  auto malformed = [this]() {
++    if (last_dec_error_ != FrameCryptionState::kDecryptionFailed) {
++      last_dec_error_ = FrameCryptionState::kDecryptionFailed;
++      onFrameCryptionStateChanged(last_dec_error_);
++    }
++  };
++  if (unencrypted_bytes > data_in.size()) { malformed(); return; }
++  webrtc::Buffer encrypted_buffer(data_in.data() + unencrypted_bytes,
++                                  data_in.size() - unencrypted_bytes);
++  if (FrameIsH264(frame.get(), type_) && NeedsRbspUnescaping(encrypted_buffer)) {
++    encrypted_buffer.SetData(H264::ParseRbsp(encrypted_buffer));
++#ifdef RTC_ENABLE_H265
++  } else if (FrameIsH265(frame.get(), type_) && NeedsRbspUnescaping(encrypted_buffer)) {
++    encrypted_buffer.SetData(H265::ParseRbsp(encrypted_buffer));
++#endif
++  }
++  // AES-GCM requires a 16-byte tag, its IV and the two-byte trailer.
++  if (encrypted_buffer.size() < 16 + getIvSize() + 2) { malformed(); return; }
++
+ 
+   webrtc::Buffer frame_header =
+       webrtc::Buffer::CreateUninitializedWithSize(unencrypted_bytes);
+@@ -643,8 +659,8 @@
+   }
+ 
+   webrtc::Buffer frame_trailer = webrtc::Buffer::CreateUninitializedWithSize(2);
+-  frame_trailer[0] = data_in[data_in.size() - 2];
+-  frame_trailer[1] = data_in[data_in.size() - 1];
++  frame_trailer[0] = encrypted_buffer[encrypted_buffer.size() - 2];
++  frame_trailer[1] = encrypted_buffer[encrypted_buffer.size() - 1];
+   uint8_t ivLength = frame_trailer[0];
+   uint8_t key_index = frame_trailer[1];
+ 
+@@ -686,25 +702,7 @@
+ 
+   webrtc::Buffer iv = webrtc::Buffer::CreateUninitializedWithSize(ivLength);
+   for (size_t i = 0; i < ivLength; i++) {
+-    iv[i] = data_in[data_in.size() - 2 - ivLength + i];
+-  }
+-
+-  webrtc::Buffer encrypted_buffer =
+-      webrtc::Buffer::CreateUninitializedWithSize(data_in.size() - unencrypted_bytes);
+-  for (size_t i = unencrypted_bytes; i < data_in.size(); i++) {
+-    encrypted_buffer[i - unencrypted_bytes] = data_in[i];
+-  }
+-
+-  if (FrameIsH264(frame.get(), type_) &&
+-      NeedsRbspUnescaping(encrypted_buffer)) {
+-    encrypted_buffer.SetData(
+-        H264::ParseRbsp(encrypted_buffer.data(), encrypted_buffer.size()));
+-#ifdef RTC_ENABLE_H265
+-  } else if (FrameIsH265(frame.get(), type_) &&
+-             NeedsRbspUnescaping(encrypted_buffer)) {
+-    encrypted_buffer.SetData(
+-        H265::ParseRbsp(encrypted_buffer.data(), encrypted_buffer.size()));
+-#endif // RTC_ENABLE_H265
++    iv[i] = encrypted_buffer[encrypted_buffer.size() - 2 - ivLength + i];
+   }
+ 
+   webrtc::Buffer encrypted_payload =
+@@ -987,3 +985,6 @@
+ }
+ 
+ }  // namespace webrtc
++
++// Link anchor: require this repaired object instead of the archive copy.
++namespace goodsharing { void requirePatchedFrameCryptor() {} }

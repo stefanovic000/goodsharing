@@ -1,0 +1,41 @@
+# Recover sender audio pressure without revoking a healthy share
+
+Date: 2026-10-22, Europe/Budapest. Local-only work uses owned fixtures. Normal UI audio remains disabled; the isolated 40 ms NetEq experiment remains unadopted and the installed SDK is unchanged.
+
+## A reproduced sender-side termination
+
+The preceding reports include a failed sender with a 100 ms audio high-water mark, one rejected audio block and a failed publication gate. The report labels its shutdown as publication permission revocation. These counters are consistent with the input-overflow branch, which itself closes the gate; the old report does not timestamp the earliest cause and cannot prove that ordering for the historical failure. A separate original-SDK failure reports a media-publication error at a 70 ms audio high-water mark. That different failure is not explained by a full queue and remains open.
+
+A native before-change control fills the audio queue with eleven fresh, correctly ordered blocks. The preceding implementation permanently closes the otherwise-ready gate on the eleventh. `artifacts/sender-pressure-before.log` retains the expected failure. This is an availability policy for locally buffered PCM, separate from the encryption-failure policy.
+
+## Keep the existing bounds and discard old PCM
+
+The input queue still has ten 10 ms blocks of capacity and a 100 ms source-age limit. Before admitting a valid fresh block, it discards expired queued blocks. If the queue remains full, the new block replaces the oldest block. Retained PCM keeps its original first-sample timestamp and order; no replay, time shift or additional queue is introduced. Separate counters identify capacity eviction and expiration, with a first-pressure timestamp for correlation.
+
+The consumer also discards expired blocks before returning input to the publisher. If this empties the queue, it waits for fresh input or cancellation/revocation instead of returning old PCM. If a block expires after dequeue because the worker was descheduled, the publisher drops that block and continues. The final 100 ms handoff-age check is preserved, as are SDK-side age enforcement and the final outgoing permission checks. An SDK handoff error remains a failure; this change does not assume that an ambiguous asynchronous SDK operation can safely be retried.
+
+Pressure does not configure or reopen an encryption gate. Missing readiness, malformed/out-of-order input, audio-off mode, Stop and subsequent owner/track encryption failure retain their existing behavior. The native controls require exact retained timestamps and samples after capacity replacement, no expired replay after a real bounded consumer pause, fresh recovery and no consumption or admission after a subsequent MissingKey event. All 22 native tests pass.
+
+## Controlled actual transport pressure
+
+The synthetic publisher probe can pause only its owned audio worker once, immediately before the final age/permission checks. These optional observer hooks are absent from the normal app's configuration. A 140 ms pause expires the held block and builds pressure while the independent producer continues. The test requires observed pressure drops, unchanged capacity/age limits, at least one hundred subsequent successful audio handoffs, a fresh handoff beginning within 200 ms after the pause, a still-open publication and the existing stereo/video/security/cleanup checks.
+
+Both the stereo and wrong-key pressure cases pass. In the stereo observation, four queued blocks expire and the held expired block is separately dropped. The first subsequently successful handoff begins 17 microseconds after the pause ends, and 697 further handoffs complete. Its maximum handoff-start source age is 91.598 ms, within the unchanged 100 ms limit. Both generated video qualities decode at approximately 60 FPS. This measures local transport submission and decoded content, not physical speaker/display latency or interruption-free audible playback during an intentional 140 ms stall. The wrong-key receiver admits no media while sender recovery continues.
+
+## Correlate source progress and room lifecycle
+
+Optional `GOODSHARING_TEST_AV_TRACE` diagnostics now add at most 128 sanitized room-event records per controller. They timestamp join readiness, requested state transitions, publication state, encryption-state codes, reconnect/disconnect, remote unpublish/participant removal and cleanup. They contain no invitation, URL, key or raw SDK exception body. The existing bounded one-second sender samples also include input queue/counters, gate state and submitted audio/video counts, alongside encoder rates. Analysis retains these events with the sticky first playback fault, enabling same-PC ordering of source pressure and connection events. Clock/statistics/event metadata never grants media permission.
+
+## Verification and remaining work
+
+All 22 native tests pass. The final integration set passes **23/30** cases: 11/11 publisher security/lifecycle cases, 2/2 controlled audio-pressure cases, 8/13 original-SDK A/V cases, 0/2 longer observations and 2/2 normal video-only cases. All thirteen A/V cases pass their expected process-exit checks. All three quality-handover cases pass. Failures remain failures: ordinary 720p, 1080p, source closure, static playback, static-source closure, longer cancellation and longer static-to-motion each fail one or more unchanged continuity/presentation checks.
+
+The 58-second cancellation observation has a 123.5 ms longest quiet interval. Its first reset follows a 151.087 ms gap since the previous video ingress, with a valid same-epoch sender clock. The next projected video deadline is 88.089 ms ahead, exceeding the existing 80 ms common horizon when the previous video is already stale. The sender remains active, its nearest sampled audio high-water mark is 20 ms, and no sender pressure, reconnect or worker-failure event is recorded before the first playback reset. The longer static-to-motion observation also keeps its sender active but fails with a 3,002.021 ms longest quiet interval and an endpoint discontinuity as its first recorded reset. This separates these observations from a sender teardown; per-second progress cannot rule out a brief encoder/handoff gap, so per-frame timing is still needed to locate the video gap precisely.
+
+There is also a fixture-readiness limitation: the ordinary source-exit case closes the source after 123 drawn video frames, while audio has committed no media and is still unclocked. Its readiness file covers video only even though later assertions require heard audio. Preserve this failure; a follow-up should require actual A/V readiness before testing closure after established playback. This does not excuse the other ordinary or longer continuity failures.
+
+The [validation manifest](../artifacts/20261022-sender-pressure-validation.json), [source archive](../artifacts/20261022-sender-pressure-source.zip) and [binary archive](../artifacts/20261022-sender-pressure-binaries.zip) retain all outcomes, before-change reproduction and actual-data lifecycle controls. Snapshot verification includes the preceding frozen evidence/archives and unchanged SDK DLLs. Final process auditing is read-only and finds no remaining workspace executable.
+
+Preventing a sender queue-pressure shutdown does not establish reliable synchronized receiving. Receiver timing/permission rules, the 60 ms PCM queue/residence bound, 150 ms video lifetime, 80 ms common A/V horizon and 15/30 ms endpoint target/hard-lead bounds are unchanged. Event interpretation is inferred from the retained fields; it does not assign every historical failure to this pressure branch.
+
+Next correct the A/V closure-fixture readiness and correlate per-frame encoder handoff, receiver ingress and presentation around the retained video gap. Also audit the scheduler's sample-time model against NetEq timestamp advancement during time stretching before changing delay limits. Continue diagnosing distinct video-publication failures and bounded endpoint recovery. Keep normal UI audio disabled until synchronized playback is reliable. Three-share performance, physical synchronization, Internet congestion, game coexistence and whole-app security acceptance remain open. No VPS service was deployed and no unrelated application was closed.

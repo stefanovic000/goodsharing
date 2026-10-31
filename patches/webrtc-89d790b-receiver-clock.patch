@@ -1,0 +1,97 @@
+--- a/audio/channel_receive.cc
++++ b/audio/channel_receive.cc
+@@ -9,6 +9,8 @@
+  */
+ 
+ #include "audio/channel_receive.h"
++#include "livekit/receiver_media_clock.h"
++#include "rtc_base/time_utils.h"
+ 
+ #include <algorithm>
+ #include <atomic>
+@@ -461,6 +463,10 @@
+           audio_frame->data(), audio_frame->samples_per_channel_,
+           audio_frame->sample_rate_hz_, audio_frame->num_channels_,
+           audio_frame->timestamp_);
++      const goodsharing::AudioClockContext context{
++          data.data, data.sample_rate, data.channels, data.samples_per_channel,
++          goodsharing::receiverClocks().audio(this, data.timestamp, webrtc::TimeMicros())};
++      const goodsharing::AudioClockScope scope(context);
+       audio_sink_->OnData(data);
+     }
+   }
+@@ -614,6 +620,7 @@
+       frame_decryptor_(frame_decryptor),
+       crypto_options_(crypto_options),
+       absolute_capture_time_interpolator_(&env_.clock()) {
++  goodsharing::receiverClocks().add(this, true, remote_ssrc_);
+   RTC_DCHECK(audio_device_module);
+   RTC_DCHECK(packet_router_);
+ 
+@@ -627,6 +634,7 @@
+ }
+ 
+ ChannelReceive::~ChannelReceive() {
++  goodsharing::receiverClocks().remove(this);
+   RTC_DCHECK_RUN_ON(&construction_thread_);
+ 
+   packet_router_->RemoveReceiveRtpModule(rtp_rtcp_.get());
+@@ -800,6 +808,15 @@
+ 
+   // Deliver RTCP packet to RTP/RTCP module for parsing
+   rtp_rtcp_->IncomingRtcpPacket(std::span(data, length));
++  // Keep the sender-report clock separate from the RTT-dependent local-NTP
++  // estimator. A sender NTP/RTP pair does not require a guessed RTT or epoch.
++  if (const auto sr = rtp_rtcp_->GetSenderReportStats(); sr &&
++      sr->last_remote_ntp_timestamp.Valid() && sr->last_arrival_timestamp.IsFinite()) {
++    goodsharing::receiverClocks().update(this,
++        sr->last_remote_ntp_timestamp.ToMs() * 1000,
++        sr->last_remote_rtp_timestamp, sr->last_arrival_timestamp.us());
++  }
++
+ 
+   std::optional<TimeDelta> rtt = rtp_rtcp_->LastRtt();
+   if (!rtt.has_value()) {
+--- a/video/rtp_video_stream_receiver2.cc
++++ b/video/rtp_video_stream_receiver2.cc
+@@ -9,6 +9,8 @@
+  */
+ 
+ #include "video/rtp_video_stream_receiver2.h"
++#include "livekit/receiver_media_clock.h"
++#include "rtc_base/time_utils.h"
+ 
+ #include <algorithm>
+ #include <cstdint>
+@@ -339,6 +341,7 @@
+       has_received_frame_(false),
+       frames_decryptable_(false),
+       absolute_capture_time_interpolator_(&env_.clock()) {
++  goodsharing::receiverClocks().add(this, false, config_.rtp.remote_ssrc);
+   packet_sequence_checker_.Detach();
+   if (packet_router_) {
+     // Do not register as REMB candidate, this is only done when starting to
+@@ -386,6 +389,7 @@
+ }
+ 
+ RtpVideoStreamReceiver2::~RtpVideoStreamReceiver2() {
++  goodsharing::receiverClocks().remove(this);
+   if (packet_router_)
+     packet_router_->RemoveReceiveRtpModule(rtp_rtcp_.get());
+   ulpfec_receiver_.reset();
+@@ -1292,6 +1296,15 @@
+   }
+ 
+   rtp_rtcp_->IncomingRtcpPacket((rtcp_packet));
++  // Keep the sender-report clock separate from the RTT-dependent local-NTP
++  // estimator. A sender NTP/RTP pair does not require a guessed RTT or epoch.
++  if (const auto sr = rtp_rtcp_->GetSenderReportStats(); sr &&
++      sr->last_remote_ntp_timestamp.Valid() && sr->last_arrival_timestamp.IsFinite()) {
++    goodsharing::receiverClocks().update(this,
++        sr->last_remote_ntp_timestamp.ToMs() * 1000,
++        sr->last_remote_rtp_timestamp, sr->last_arrival_timestamp.us());
++  }
++
+ 
+   std::optional<TimeDelta> rtt = rtp_rtcp_->LastRtt();
+   if (!rtt.has_value()) {

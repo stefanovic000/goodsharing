@@ -1,0 +1,53 @@
+GoodSharing third-party notices (draft)
+=======================================
+
+This file lists the components shipped in this package and the license terms they
+are provided under. It is a draft prepared for the packaging milestone: the
+project's own license and the final distribution/legal review are still pending
+(see docs/51-release-readiness-plan.md, Milestone 6).
+
+Qt 6.8.3 (QtCore, QtGui, QtQml, QtQuick, QtQuickControls2, QtNetwork,
+QtMultimedia) - https://www.qt.io/
+  GNU Lesser General Public License version 3, or a commercial Qt license.
+  This build links Qt dynamically so it can be replaced by a compatible build.
+  Qt source code: https://download.qt.io/official_releases/qt/6.8/6.8.3/submodules/
+
+  Qt Multimedia uses the FFmpeg backend. FFmpeg libraries are licensed under the
+  GNU Lesser General Public License version 2.1 or later. No GPL-only components
+  are enabled in this build.
+  FFmpeg: https://ffmpeg.org/
+
+LiveKit C++ SDK 1.12.3 and its native libraries (livekit.dll, livekit_ffi.dll) -
+https://github.com/livekit/client-sdk-cpp
+  Apache License 2.0. The SDK embeds WebRTC and a Rust engine.
+
+libwebrtc (as used by the LiveKit SDK) - https://webrtc.googlesource.com/src
+  BSD 3-Clause License.
+
+libyuv (build-time static library used for frame conversion) -
+https://chromium.googlesource.com/libyuv/libyuv
+  BSD 3-Clause License. libyuv 917276082 (pinned in dependencies.lock.json).
+
+libsoxr (audio resampling, through the LiveKit SDK) - https://sourceforge.net/projects/soxr/
+  GNU Lesser General Public License version 2.1.
+
+H264/AVC codec notice
+  H.264/AVC is covered by third-party patent pools. Distributing or using an
+  encoder can require a license from those pools. This project currently builds
+  against the SDK's H.264 support for local testing; no patent license is claimed
+  or included here.
+
+LiveKit server (not shipped)
+  The package contains no server. For self-hosting see the LiveKit project
+  (Apache License 2.0). The project's own deployment notes are in docs/05.
+
+Go and Rust runtimes (inside the SDK binaries, not shipped separately)
+  Go: BSD 3-Clause. Rust: MIT/Apache-2.0, depending on the crate.
+
+Qt platform and QML plugins
+  The deployed plugin binaries (platforms/qwindows.dll, imageformats, multimedia,
+  QML modules) are part of Qt and carry the same LGPL-3.0 terms as Qt itself.
+
+No warranty
+  The software is provided "as is", without warranty of any kind. See the license
+  texts above for the exact terms.

@@ -1,0 +1,667 @@
+--- a/include/livekit/audio_source.h
++++ b/include/livekit/audio_source.h
+@@ -17,6 +17,7 @@
+ #pragma once
+ 
+ #include <cstdint>
++#include <optional>
+ 
+ #include "livekit/audio_frame.h"
+ #include "livekit/ffi_handle.h"
+@@ -129,8 +130,14 @@
+   /// @throws std::runtime_error if the FFI reports an error or a timeout
+   ///         occurs in bounded-wait mode.
+   void captureFrame(const AudioFrame& frame, int timeout_ms = 20);
++  /// Original first-sample MSVC steady_clock microseconds on this sender PC.
++  /// Requires an unbuffered source and a fresh, non-future 10 ms frame.
++  void captureFrameAt(const AudioFrame& frame, std::int64_t capture_timestamp_us,
++                      int timeout_ms = 100);
+ 
+ private:
++  void captureFrameImpl(const AudioFrame& frame, int timeout_ms,
++                        std::optional<std::int64_t> capture_timestamp_us);
+   // Internal helper to reset the local queue tracking (like _release_waiter).
+   void resetQueueTracking() noexcept;
+ 
+--- a/src/audio_source.cpp
++++ b/src/audio_source.cpp
+@@ -89,6 +89,21 @@
+ }
+ 
+ void AudioSource::captureFrame(const AudioFrame& frame, int timeout_ms) {
++  captureFrameImpl(frame, timeout_ms, std::nullopt);
++}
++
++void AudioSource::captureFrameAt(const AudioFrame& frame, std::int64_t capture_timestamp_us,
++                                 int timeout_ms) {
++  if (queue_size_ms_ != 0 || capture_timestamp_us <= 0 ||
++      frame.sampleRate() != sample_rate_ || frame.numChannels() != num_channels_ ||
++      frame.samplesPerChannel() != static_cast<std::size_t>(sample_rate_ / 100)) {
++    throw std::invalid_argument("Timed capture requires unbuffered matching 10 ms PCM and a positive source timestamp");
++  }
++  captureFrameImpl(frame, timeout_ms, capture_timestamp_us);
++}
++
++void AudioSource::captureFrameImpl(const AudioFrame& frame, int timeout_ms,
++                                  std::optional<std::int64_t> capture_timestamp_us) {
+   using namespace std::chrono_literals;
+   if (!handle_) {
+     return;
+@@ -109,7 +124,8 @@
+   last_capture_ = now;
+ 
+   // Build AudioFrameBufferInfo from the wrapper
+-  const proto::AudioFrameBufferInfo buf = frame.toProto();
++  proto::AudioFrameBufferInfo buf = frame.toProto();
++  if (capture_timestamp_us) buf.set_sender_capture_us(*capture_timestamp_us);
+   // Use async FFI API and block until the callback completes
+   auto fut = FfiClient::instance().captureAudioFrameAsync(handle_.get(), buf);
+   if (timeout_ms == 0) {
+@@ -121,7 +137,7 @@
+   if (status == std::future_status::ready || status == std::future_status::deferred) {
+     fut.get();
+   } else { // std::future_status::timeout
+-    LK_LOG_WARN("captureAudioFrameAsync timed out after {} ms", timeout_ms);
++    throw std::runtime_error("Audio capture callback timed out");
+   }
+ }
+ 
+--- a/include/livekit/audio_stream.h
++++ b/include/livekit/audio_stream.h
+@@ -43,6 +43,13 @@
+ /// @brief Event containing an audio frame received from an AudioStream.
+ struct AudioFrameEvent {
+   AudioFrame frame; ///< The decoded PCM audio frame.
++  /// Optional receiver WebRTC clock timing. Absence never means zero.
++  std::optional<std::int64_t> capture_time_ms;
++  std::optional<std::int64_t> sink_time_us;
++  /// Actual decoded RTP timing, in the separate RTCP sender NTP domain.
++  /// Infrastructure supplied; not an E2EE-authenticated timestamp.
++  std::optional<std::int64_t> sender_ntp_us;
++  std::optional<std::uint32_t> rtp_timestamp, rtcp_reports, sender_clock_epoch;
+ };
+ // NOLINTEND(bugprone-exception-escape)
+ 
+@@ -71,6 +78,10 @@
+     /// if the queue is full, the oldest frame is dropped when a new one
+     /// arrives.
+     std::size_t capacity{0};
++
++    /// Requested decoded PCM format. Defaults preserve the original mono API.
++    std::uint32_t sample_rate{48000};
++    std::uint32_t num_channels{1};
+ 
+     /// Optional: name of a noise cancellation module to enable for this stream.
+     /// Empty string means "no noise cancellation".
+--- a/src/audio_stream.cpp
++++ b/src/audio_stream.cpp
+@@ -142,10 +142,8 @@
+   FfiRequest req;
+   auto* new_audio_stream = req.mutable_new_audio_stream();
+   new_audio_stream->set_track_handle(static_cast<uint64_t>(track->ffiHandleId()));
+-  // TODO, sample_rate and num_channels are not useful in AudioStream, remove it
+-  // from FFI.
+-  //  new_audio_stream->set_sample_rate(options_.sample_rate);
+-  //  new_audio_stream->set_num_channels(options.num_channels);
++  new_audio_stream->set_sample_rate(options_.sample_rate);
++  new_audio_stream->set_num_channels(options_.num_channels);
+   new_audio_stream->set_type(proto::AudioStreamType::AUDIO_STREAM_NATIVE);
+ 
+   if (!options_.noise_cancellation_module.empty()) {
+@@ -171,10 +169,8 @@
+   FfiRequest req;
+   auto* as = req.mutable_audio_stream_from_participant();
+   as->set_participant_handle(participant.ffiHandleId());
+-  // TODO, sample_rate and num_channels are not useful in AudioStream, remove it
+-  // from FFI.
+-  // as->set_sample_rate(options_.sample_rate);
+-  // as->set_num_channels(options_.num_channels);
++  as->set_sample_rate(options_.sample_rate);
++  as->set_num_channels(options_.num_channels);
+   as->set_type(proto::AudioStreamType::AUDIO_STREAM_NATIVE);
+   as->set_track_source(static_cast<proto::TrackSource>(track_source));
+ 
+@@ -201,7 +197,14 @@
+   }
+   if (ase.has_frame_received()) {
+     const auto& fr = ase.frame_received();
+-    AudioFrameEvent ev{AudioFrame::fromOwnedInfo(fr.frame())};
++    AudioFrameEvent ev{AudioFrame::fromOwnedInfo(fr.frame()), std::nullopt, std::nullopt};
++    const auto& timing = fr.frame().info();
++    if (timing.has_capture_time_ms()) ev.capture_time_ms = timing.capture_time_ms();
++    if (timing.has_sink_time_us()) ev.sink_time_us = timing.sink_time_us();
++    if (timing.has_sender_ntp_us()) ev.sender_ntp_us = timing.sender_ntp_us();
++    if (timing.has_rtp_timestamp()) ev.rtp_timestamp = timing.rtp_timestamp();
++    if (timing.has_rtcp_reports()) ev.rtcp_reports = timing.rtcp_reports();
++    if (timing.has_sender_clock_epoch()) ev.sender_clock_epoch = timing.sender_clock_epoch();
+     pushFrame(std::move(ev));
+   } else if (ase.has_eos()) {
+     pushEos();
+--- a/include/livekit/video_stream.h
++++ b/include/livekit/video_stream.h
+@@ -43,6 +43,9 @@
+   std::int64_t timestamp_us;
+   VideoRotation rotation;
+   std::optional<VideoFrameMetadata> metadata;
++  /// RTCP sender NTP domain; infrastructure supplied, not local capture time.
++  std::optional<std::int64_t> sender_ntp_us;
++  std::optional<std::uint32_t> rtp_timestamp, rtcp_reports, sender_clock_epoch;
+ };
+ 
+ namespace proto {
+@@ -67,7 +70,7 @@
+ public:
+   /// @brief Options for creating a decoded video frame stream.
+   struct Options {
+-    /// Maximum number of VideoFrameEvent items buffered in the internal queue.
++    /// GoodSharing: maximum items at each native and C++ decoded queue stage.
+     /// 0 means "unbounded" (the queue can grow without limit).
+     ///
+     /// With a non-zero capacity, the queue behaves like a ring-buffer: if it
+@@ -78,6 +81,13 @@
+     /// converts into this format if supported (e.g., RGBA, BGRA, I420, ...).
+     VideoBufferType format{VideoBufferType::RGBA};
+   };
++
++  struct Diagnostics {
++    std::uint64_t frames_received{0}, frames_read{0}, frames_dropped{0};
++    std::size_t queue_high_water{0};
++  };
++  /// GoodSharing: snapshot C++ admission counters under the stream mutex.
++  Diagnostics diagnostics() const;
+ 
+   /// Factory: create a VideoStream bound to a specific Track
+   static std::shared_ptr<VideoStream> fromTrack(const std::shared_ptr<Track>& track, const Options& options);
+@@ -123,6 +133,7 @@
+   void pushEos();
+ 
+   mutable std::mutex mutex_;
++  Diagnostics diagnostics_;
+   std::condition_variable cv_;
+   std::deque<VideoFrameEvent> queue_;
+   std::size_t capacity_{0};
+--- a/src/video_stream.cpp
++++ b/src/video_stream.cpp
+@@ -17,6 +17,9 @@
+ #include "livekit/video_stream.h"
+ 
+ #include <utility>
++#include <algorithm>
++#include <limits>
++#include <stdexcept>
+ 
+ #include "ffi.pb.h"
+ #include "ffi_client.h"
+@@ -50,6 +53,7 @@
+   const std::scoped_lock<std::mutex> lock(other.mutex_);
+   queue_ = std::move(other.queue_);
+   capacity_ = other.capacity_;
++  diagnostics_ = other.diagnostics_;
+   eof_ = other.eof_;
+   closed_ = other.closed_;
+   stream_handle_ = std::move(other.stream_handle_);
+@@ -72,6 +76,7 @@
+ 
+     queue_ = std::move(other.queue_);
+     capacity_ = other.capacity_;
++  diagnostics_ = other.diagnostics_;
+     eof_ = other.eof_;
+     closed_ = other.closed_;
+     stream_handle_ = std::move(other.stream_handle_);
+@@ -95,6 +100,7 @@
+     return false; // EOS / closed
+   }
+ 
++  ++diagnostics_.frames_read;
+   out = std::move(queue_.front());
+   queue_.pop_front();
+   return true;
+@@ -127,6 +133,9 @@
+ // --------------------- Internal helpers ---------------------
+ 
+ void VideoStream::initFromTrack(const std::shared_ptr<Track>& track, const Options& options) {
++  if (options.capacity > std::numeric_limits<std::uint32_t>::max()) {
++    throw std::invalid_argument("Video queue capacity exceeds the FFI range");
++  }
+   capacity_ = options.capacity;
+ 
+   // Subscribe to FFI events, this is essential to get video frames from FFI.
+@@ -139,6 +148,7 @@
+   new_video_stream->set_type(proto::VideoStreamType::VIDEO_STREAM_NATIVE);
+   new_video_stream->set_normalize_stride(true);
+   new_video_stream->set_format(toProto(options.format));
++  new_video_stream->set_queue_size_frames(static_cast<std::uint32_t>(options.capacity));
+ 
+   auto resp = FfiClient::instance().sendRequest(req);
+   if (!resp.has_new_video_stream()) {
+@@ -152,6 +162,9 @@
+ }
+ 
+ void VideoStream::initFromParticipant(Participant& participant, TrackSource track_source, const Options& options) {
++  if (options.capacity > std::numeric_limits<std::uint32_t>::max()) {
++    throw std::invalid_argument("Video queue capacity exceeds the FFI range");
++  }
+   capacity_ = options.capacity;
+ 
+   // 1) Subscribe to FFI events
+@@ -166,6 +179,7 @@
+   vs->set_track_source(static_cast<proto::TrackSource>(track_source));
+   vs->set_normalize_stride(true);
+   vs->set_format(toProto(options.format));
++  vs->set_queue_size_frames(static_cast<std::uint32_t>(options.capacity));
+ 
+   auto resp = FfiClient::instance().sendRequest(req);
+   // Adjust field names to match your proto exactly:
+@@ -192,6 +206,10 @@
+     VideoFrameEvent ev;
+     ev.frame = VideoFrame::fromOwnedInfo(fr.buffer());
+     ev.timestamp_us = fr.timestamp_us();
++    if (fr.has_sender_ntp_us()) ev.sender_ntp_us = fr.sender_ntp_us();
++    if (fr.has_rtp_timestamp()) ev.rtp_timestamp = fr.rtp_timestamp();
++    if (fr.has_rtcp_reports()) ev.rtcp_reports = fr.rtcp_reports();
++    if (fr.has_sender_clock_epoch()) ev.sender_clock_epoch = fr.sender_clock_epoch();
+     ev.rotation = static_cast<VideoRotation>(fr.rotation());
+     if (fr.has_metadata()) {
+       ev.metadata = fromProto(fr.metadata());
+@@ -202,6 +220,11 @@
+   }
+ }
+ 
++VideoStream::Diagnostics VideoStream::diagnostics() const {
++  const std::scoped_lock<std::mutex> lock(mutex_);
++  return diagnostics_;
++}
++
+ void VideoStream::pushFrame(VideoFrameEvent&& ev) {
+   {
+     const std::scoped_lock<std::mutex> lock(mutex_);
+@@ -210,12 +233,15 @@
+       return;
+     }
+ 
++    ++diagnostics_.frames_received;
+     if (capacity_ > 0 && queue_.size() >= capacity_) {
++      ++diagnostics_.frames_dropped;
+       // Ring behavior: drop oldest frame.
+       queue_.pop_front();
+     }
+ 
+     queue_.push_back(std::move(ev));
++    diagnostics_.queue_high_water = std::max(diagnostics_.queue_high_water, queue_.size());
+   }
+   cv_.notify_one();
+ }
+--- a/include/livekit/room_event_types.h
++++ b/include/livekit/room_event_types.h
+@@ -700,6 +700,8 @@
+ 
+ /// Fired when a participant's E2EE state changes.
+ struct E2eeStateChangedEvent {
++  /// GoodSharing: empty on an incompatible engine; never grant readiness then.
++  std::string track_sid;
+   /// Local or remote participant whose state changed (owned by Room).
+   Participant* participant = nullptr;
+ 
+--- a/include/livekit/room.h
++++ b/include/livekit/room.h
+@@ -44,6 +44,7 @@
+ class E2EEManager;
+ class LocalParticipant;
+ class RemoteParticipant;
++class RemoteTrackPublication;
+ class SubscriptionThreadDispatcher;
+ 
+ /// Represents a single ICE server configuration.
+@@ -239,6 +240,11 @@
+   ///   handle can be promoted with @c lock(); a handle becomes empty once the
+   ///   corresponding participant disconnects or the room is torn down.
+   std::vector<std::weak_ptr<RemoteParticipant>> remoteParticipants() const;
++
++  /// GoodSharing: copy initial publications under the same room lock used by
++  /// room events. Avoid iterating RemoteParticipant's mutable map concurrently.
++  std::vector<std::pair<std::string, std::shared_ptr<RemoteTrackPublication>>>
++  remotePublicationSnapshot() const;
+ 
+   /// Returns the current connection state of the room.
+   ConnectionState connectionState() const;
+--- a/include/livekit/remote_track_publication.h
++++ b/include/livekit/remote_track_publication.h
+@@ -96,6 +96,9 @@
+   bool setVideoDimensions(const std::uint32_t width, const std::uint32_t height);
+ 
+ private:
++  friend class Room;
++  // An incoming event acknowledges state; it must not send another request.
++  void observeSubscribed(bool subscribed) noexcept { subscribed_ = subscribed; }
+   enum class VideoPreference {
+     DEFAULT,
+     DIMENSIONS,
+--- a/src/room.cpp
++++ b/src/room.cpp
+@@ -365,6 +365,18 @@
+   return out;
+ }
+ 
++std::vector<std::pair<std::string, std::shared_ptr<RemoteTrackPublication>>>
++Room::remotePublicationSnapshot() const {
++  const std::scoped_lock<std::mutex> guard(lock_);
++  std::vector<std::pair<std::string, std::shared_ptr<RemoteTrackPublication>>> out;
++  for (const auto& [identity, participant] : remote_participants_) {
++    for (const auto& [sid, publication] : participant->trackPublications()) {
++      out.emplace_back(identity, publication);
++    }
++  }
++  return out;
++}
++
+ ConnectionState Room::connectionState() const {
+   const std::scoped_lock<std::mutex> g(lock_);
+   return connection_state_;
+@@ -678,7 +690,7 @@
+               const auto& owned_publication = tp.publication();
+               auto rpublication = std::make_shared<RemoteTrackPublication>(owned_publication);
+               // Store it on the participant, keyed by SID
+-              rparticipant->mutableTrackPublications().emplace(rpublication->sid(), std::move(rpublication));
++              rparticipant->mutableTrackPublications().emplace(rpublication->sid(), rpublication);
+               ev.participant = rparticipant;
+               ev.publication = rpublication;
+             } else {
+@@ -765,7 +777,7 @@
+             }
+             // Attach to publication, mark subscribed
+             rpublication->setTrack(remote_track);
+-            rpublication->setSubscribed(true);
++            rpublication->observeSubscribed(true);
+           }
+ 
+           // Emit remote track_subscribed-style callback
+@@ -810,7 +822,7 @@
+             unsub_source = publication->source();
+             auto track = publication->track();
+             publication->setTrack(nullptr);
+-            publication->setSubscribed(false);
++            publication->observeSubscribed(false);
+             ev.participant = rparticipant;
+             ev.publication = publication;
+             ev.track = track;
+@@ -1219,6 +1231,7 @@
+ 
+             ev.participant = participant;
+             ev.state = static_cast<EncryptionState>(es.state());
++            ev.track_sid = es.track_sid();
+           }
+           if (delegate_snapshot) {
+             delegate_snapshot->onE2eeStateChanged(*this, ev);
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -22,7 +22,7 @@
+ # vcpkg is only used on Windows; Linux/macOS use system package managers
+ if(WIN32)
+   option(LIVEKIT_USE_VCPKG "Use vcpkg for dependency management (Windows only)" ON)
+-  set(LIVEKIT_USE_SYSTEM_PROTOBUF ON CACHE BOOL "Use system protobuf (vcpkg) on Windows" FORCE)
++  set(LIVEKIT_USE_SYSTEM_PROTOBUF OFF CACHE BOOL "Use pinned vendored protobuf" FORCE)
+   # Force /MD or /MDd for ALL targets (including FetchContent subprojects)
+   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL" CACHE STRING "" FORCE)
+   add_compile_options(/utf-8)
+@@ -213,183 +213,17 @@
+   @ONLY
+ )
+ 
+-find_program(CARGO_EXECUTABLE NAMES cargo REQUIRED)
+-
+-# Determine Rust target triple for cross-compilation on macOS
+-set(RUST_TARGET_TRIPLE "")
+-if(APPLE AND CMAKE_OSX_ARCHITECTURES)
+-  if(CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
+-    set(RUST_TARGET_TRIPLE "x86_64-apple-darwin")
+-  elseif(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+-    set(RUST_TARGET_TRIPLE "aarch64-apple-darwin")
+-  endif()
+-endif()
+-
+-if(RUST_TARGET_TRIPLE)
+-  set(RUST_TARGET_DIR "${RUST_ROOT}/target/${RUST_TARGET_TRIPLE}")
+-else()
+-  set(RUST_TARGET_DIR "${RUST_ROOT}/target")
+-endif()
+-
+-# Detect the GCC toolchain's library directory so cargo can find the matching libstdc++.
+-# This is needed when using a non-system GCC (e.g. GCC 14) on an older distro whose
+-# system libstdc++ lacks symbols like __cxa_call_terminate.
+-set(GCC_LIB_DIR "")
+-if(NOT WIN32)
+-  get_filename_component(_gcc_bin_dir "${CMAKE_C_COMPILER}" DIRECTORY)
+-  get_filename_component(_gcc_root "${_gcc_bin_dir}" DIRECTORY)
+-  if(IS_DIRECTORY "${_gcc_root}/lib64")
+-    set(GCC_LIB_DIR "${_gcc_root}/lib64")
+-  elseif(IS_DIRECTORY "${_gcc_root}/lib")
+-    set(GCC_LIB_DIR "${_gcc_root}/lib")
+-  endif()
+-endif()
+-
+-set(RUN_CARGO_SCRIPT ${LIVEKIT_BINARY_DIR}/run_cargo.cmake)
+-file(WRITE ${RUN_CARGO_SCRIPT}
+-"if(NOT DEFINED CFG)
+-  set(CFG Debug)
+-endif()
+-if(NOT DEFINED RUST_ROOT)
+-  message(FATAL_ERROR \"RUST_ROOT not set\")
+-endif()
+-if(NOT DEFINED CARGO)
+-  message(FATAL_ERROR \"CARGO not set\")
+-endif()
+-
+-set(ARGS build --package livekit-ffi)
+-if(NOT CFG STREQUAL \"Debug\")
+-  list(APPEND ARGS --release)
+-endif()
+-
+-if(DEFINED RUST_TARGET AND NOT RUST_TARGET STREQUAL \"\")
+-  list(APPEND ARGS --target \"\${RUST_TARGET}\")
+-  message(STATUS \"[run_cargo.cmake] Cross-compiling for target: \${RUST_TARGET}\")
+-endif()
+-
+-message(STATUS \"[run_cargo.cmake] CFG=\${CFG}  CARGO=\${CARGO}  PROTOC=\${PROTOC_PATH}\")
+-set(ENV{PROTOC} \"\${PROTOC_PATH}\")
+-
+-if(DEFINED CARGO_TARGET_DIR AND NOT CARGO_TARGET_DIR STREQUAL \"\")
+-  set(ENV{CARGO_TARGET_DIR} \"\${CARGO_TARGET_DIR}\")
+-endif()
+-
+-if(DEFINED GCC_LIB_DIR AND NOT GCC_LIB_DIR STREQUAL \"\")
+-  set(ENV{RUSTFLAGS} \"-L \${GCC_LIB_DIR} \$ENV{RUSTFLAGS}\")
+-  set(ENV{LD_LIBRARY_PATH} \"\${GCC_LIB_DIR}:\$ENV{LD_LIBRARY_PATH}\")
+-endif()
+-
+-execute_process(
+-  COMMAND \"\${CARGO}\" \${ARGS}
+-  WORKING_DIRECTORY \"\${RUST_ROOT}\"
+-  RESULT_VARIABLE rv
+-)
+-if(rv)
+-  message(FATAL_ERROR \"cargo build failed with code: \${rv}\")
+-endif()
+-")
+-
+-# Use SHARED library (DLL) on Windows to isolate /MT CRT from consuming /MD apps
+-if(WIN32)
+-  add_library(livekit_ffi SHARED IMPORTED GLOBAL)
+-  # DLL import libraries (.dll.lib)
+-  set(RUST_IMPLIB_DEBUG   "${RUST_ROOT}/target/debug/livekit_ffi.dll.lib")
+-  set(RUST_IMPLIB_RELEASE "${RUST_ROOT}/target/release/livekit_ffi.dll.lib")
+-  # Actual DLL files
+-  set(RUST_DLL_DEBUG      "${RUST_ROOT}/target/debug/livekit_ffi.dll")
+-  set(RUST_DLL_RELEASE    "${RUST_ROOT}/target/release/livekit_ffi.dll")
+-  # For OUTPUT dependency checking
+-  set(RUST_LIB_DEBUG   "${RUST_IMPLIB_DEBUG}")
+-  set(RUST_LIB_RELEASE "${RUST_IMPLIB_RELEASE}")
+-  
+-  set_target_properties(livekit_ffi PROPERTIES
+-    IMPORTED_CONFIGURATIONS "Debug;Release;RelWithDebInfo;MinSizeRel"
+-    # IMPORTED_LOCATION = DLL file
+-    IMPORTED_LOCATION_DEBUG          "${RUST_DLL_DEBUG}"
+-    IMPORTED_LOCATION_RELEASE        "${RUST_DLL_RELEASE}"
+-    IMPORTED_LOCATION_RELWITHDEBINFO "${RUST_DLL_RELEASE}"
+-    IMPORTED_LOCATION_MINSIZEREL     "${RUST_DLL_RELEASE}"
+-    # IMPORTED_IMPLIB = Import library for linking
+-    IMPORTED_IMPLIB_DEBUG            "${RUST_IMPLIB_DEBUG}"
+-    IMPORTED_IMPLIB_RELEASE          "${RUST_IMPLIB_RELEASE}"
+-    IMPORTED_IMPLIB_RELWITHDEBINFO   "${RUST_IMPLIB_RELEASE}"
+-    IMPORTED_IMPLIB_MINSIZEREL       "${RUST_IMPLIB_RELEASE}"
+-    INTERFACE_INCLUDE_DIRECTORIES    "${RUST_ROOT}/livekit-ffi/include"
+-  )
+-elseif(APPLE)
+-  # macOS: use dynamic library (.dylib) to isolate Debug/Release ABI differences
+-  add_library(livekit_ffi SHARED IMPORTED GLOBAL)
+-  set(RUST_LIB_DEBUG   "${RUST_TARGET_DIR}/debug/liblivekit_ffi.dylib")
+-  set(RUST_LIB_RELEASE "${RUST_TARGET_DIR}/release/liblivekit_ffi.dylib")
+-  
+-  set_target_properties(livekit_ffi PROPERTIES
+-    IMPORTED_CONFIGURATIONS "Debug;Release;RelWithDebInfo;MinSizeRel"
+-    IMPORTED_LOCATION_DEBUG          "${RUST_LIB_DEBUG}"
+-    IMPORTED_LOCATION_RELEASE        "${RUST_LIB_RELEASE}"
+-    IMPORTED_LOCATION_RELWITHDEBINFO "${RUST_LIB_RELEASE}"
+-    IMPORTED_LOCATION_MINSIZEREL     "${RUST_LIB_RELEASE}"
+-    IMPORTED_NO_SONAME               TRUE
+-    INTERFACE_INCLUDE_DIRECTORIES    "${RUST_ROOT}/livekit-ffi/include"
+-  )
+-else()
+-  # Linux: use dynamic library (.so) to isolate Debug/Release ABI differences
+-  add_library(livekit_ffi SHARED IMPORTED GLOBAL)
+-  set(RUST_LIB_DEBUG   "${RUST_TARGET_DIR}/debug/liblivekit_ffi.so")
+-  set(RUST_LIB_RELEASE "${RUST_TARGET_DIR}/release/liblivekit_ffi.so")
+-  
+-  set_target_properties(livekit_ffi PROPERTIES
+-    IMPORTED_CONFIGURATIONS "Debug;Release;RelWithDebInfo;MinSizeRel"
+-    IMPORTED_LOCATION_DEBUG          "${RUST_LIB_DEBUG}"
+-    IMPORTED_LOCATION_RELEASE        "${RUST_LIB_RELEASE}"
+-    IMPORTED_LOCATION_RELWITHDEBINFO "${RUST_LIB_RELEASE}"
+-    IMPORTED_LOCATION_MINSIZEREL     "${RUST_LIB_RELEASE}"
+-    IMPORTED_NO_SONAME               TRUE
+-    INTERFACE_INCLUDE_DIRECTORIES    "${RUST_ROOT}/livekit-ffi/include"
+-  )
+-endif()
+-
+-file(GLOB_RECURSE RUST_SOURCES CONFIGURE_DEPENDS
+-  "${RUST_ROOT}/livekit-ffi/src/*.rs"
+-  "${RUST_ROOT}/livekit-ffi/protocol/*.proto"
+-  "${RUST_ROOT}/livekit-ffi/build.rs"
+-  "${RUST_ROOT}/livekit-ffi/Cargo.toml"
+-)
+-list(APPEND RUST_SOURCES
+-  "${RUST_ROOT}/Cargo.toml"
+-  "${RUST_ROOT}/Cargo.lock"
+-  "${RUST_ROOT}/rust-toolchain.toml"
+-)
+-
+-set(RUST_BUILD_OUTPUTS
+-  "$<IF:$<CONFIG:Debug>,${RUST_LIB_DEBUG},${RUST_LIB_RELEASE}>"
+-)
+-if(WIN32)
+-  list(APPEND RUST_BUILD_OUTPUTS
+-    "$<IF:$<CONFIG:Debug>,${RUST_DLL_DEBUG},${RUST_DLL_RELEASE}>"
+-  )
+-endif()
+-
+-add_custom_command(
+-  OUTPUT ${RUST_BUILD_OUTPUTS}
+-  COMMAND "${CMAKE_COMMAND}"
+-          -DCFG=$<CONFIG>
+-          -DRUST_ROOT=${RUST_ROOT}
+-          -DCARGO=${CARGO_EXECUTABLE}
+-          -DPROTOC_PATH=${Protobuf_PROTOC_EXECUTABLE}
+-          -DRUST_TARGET=${RUST_TARGET_TRIPLE}
+-          -DGCC_LIB_DIR=${GCC_LIB_DIR}
+-          -P "${RUN_CARGO_SCRIPT}"
+-  WORKING_DIRECTORY "${RUST_ROOT}"
+-  DEPENDS ${RUST_SOURCES}
+-  COMMENT "Building Rust FFI via cargo"
+-  VERBATIM
+-)
+-
+-add_custom_target(build_rust_ffi
+-  DEPENDS ${RUST_BUILD_OUTPUTS}
+-)
+-
+-include(uniffi_cpp)
++# GoodSharing: reuse the exact official release engine; build only C++.
++set(RUST_ROOT "${LIVEKIT_ROOT_DIR}/client-sdk-rust")
++add_library(livekit_ffi SHARED IMPORTED GLOBAL)
++set_target_properties(livekit_ffi PROPERTIES
++  IMPORTED_LOCATION "${RUST_ROOT}/target/release/livekit_ffi.dll"
++  IMPORTED_IMPLIB "${RUST_ROOT}/target/release/livekit_ffi.dll.lib"
++  INTERFACE_INCLUDE_DIRECTORIES "${RUST_ROOT}/livekit-ffi/include")
++add_custom_target(build_rust_ffi)
++# Only upstream's internal build-version adapter uses generated UniFFI C++.
++# It is not part of the public client API; retain all room/media/token APIs.
++set(LIVEKIT_UNIFFI_CPP_GENERATED_DIR "${LIVEKIT_BINARY_DIR}/generated")
+ 
+ # Note: protozero_plugin.o removal is no longer needed since we use dynamic libraries on Unix
+ 
+@@ -424,7 +258,6 @@
+   src/token_source_json.cpp
+   src/token_source_jwt.cpp
+   src/token_source_internal.h
+-  src/uniffi_bindgen_adapter.cpp
+   src/local_participant.cpp
+   src/remote_participant.cpp
+   src/stats.cpp
+@@ -471,11 +304,6 @@
+ 
+ target_sources(livekit PRIVATE
+   $<TARGET_OBJECTS:livekit_proto>
+-  $<TARGET_OBJECTS:livekit_uniffi_cpp>
+-)
+-set_source_files_properties(
+-  ${LIVEKIT_ROOT_DIR}/src/uniffi_bindgen_adapter.cpp
+-  PROPERTIES OBJECT_DEPENDS ${LIVEKIT_UNIFFI_CPP_HEADER}
+ )
+ 
+ target_include_directories(livekit
+--- a/cmake/protobuf.cmake
++++ b/cmake/protobuf.cmake
+@@ -25,7 +25,7 @@
+ #
+ # (or set VCPKG_TARGET_TRIPLET in the environment before configuring)
+ # ---------------------------------------------------------------------------
+-if(WIN32 AND NOT LIVEKIT_USE_SYSTEM_PROTOBUF)
++if(WIN32 AND LIVEKIT_USE_VCPKG)
+   # If the user forgot the triplet, fail fast with a helpful message.
+   if(DEFINED VCPKG_TARGET_TRIPLET AND NOT VCPKG_TARGET_TRIPLET STREQUAL "x64-windows-static-md")
+     message(FATAL_ERROR
+@@ -115,6 +115,7 @@
+ FetchContent_Declare(
+   livekit_abseil
+   URL "https://github.com/abseil/abseil-cpp/archive/refs/tags/${LIVEKIT_ABSEIL_VERSION}.tar.gz"
++  URL_HASH SHA256=733726b8c3a6d39a4120d7e45ea8b41a434cdacde401cba500f14236c49b39dc
+   DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+ )
+ 
+@@ -122,6 +123,7 @@
+ FetchContent_Declare(
+   livekit_protobuf
+   URL "https://github.com/protocolbuffers/protobuf/releases/download/v${LIVEKIT_PROTOBUF_VERSION}/protobuf-${LIVEKIT_PROTOBUF_VERSION}.tar.gz"
++  URL_HASH SHA256=d19643d265b978383352b3143f04c0641eea75a75235c111cc01a1350173180e
+   DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+ )
+ 
+--- a/cmake/spdlog.cmake
++++ b/cmake/spdlog.cmake
+@@ -75,6 +75,7 @@
+ FetchContent_Declare(
+   livekit_spdlog
+   URL "https://github.com/gabime/spdlog/archive/refs/tags/v${LIVEKIT_SPDLOG_VERSION}.tar.gz"
++  URL_HASH SHA256=25c843860f039a1600f232c6eb9e01e6627f7d030a2ae5e232bdd3c9205d26cc
+   DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+ )
+ 
+--- a/cmake/nlohmann_json.cmake
++++ b/cmake/nlohmann_json.cmake
+@@ -34,6 +34,7 @@
+ FetchContent_Declare(
+   livekit_nlohmann_json
+   URL "https://github.com/nlohmann/json/releases/download/v${LIVEKIT_NLOHMANN_JSON_VERSION}/json.tar.xz"
++  URL_HASH SHA256=42f6e95cad6ec532fd372391373363b62a14af6d771056dbfc86160e6dfff7aa
+   DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+ )
+ 

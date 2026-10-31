@@ -1,0 +1,24 @@
+--- a/pkg/rtc/participant.go
++++ b/pkg/rtc/participant.go
+@@ -2813,6 +2813,12 @@
+ // subscriberRTCPWorker sends SenderReports periodically when the participant is subscribed to
+ // other publishedTracks in the room.
+ func (p *ParticipantImpl) subscriberRTCPWorker() {
++	// Opt-in synthetic fixture only; the upstream default remains three seconds.
++	reportInterval := 3 * time.Second
++	if os.Getenv("GOODSHARING_TEST_SFU_RTCP_MS") == "500" {
++		reportInterval = 500 * time.Millisecond
++		fmt.Fprintln(os.Stderr, "GoodSharing SFU RTCP experiment: interval_ms=500")
++	}
+ 	defer func() {
+ 		if r := Recover(p.GetLogger()); r != nil {
+ 			os.Exit(1)
+@@ -2872,7 +2878,7 @@
+ 			}
+ 		}
+ 
+-		time.Sleep(3 * time.Second)
++		time.Sleep(reportInterval)
+ 	}
+ }
+ 

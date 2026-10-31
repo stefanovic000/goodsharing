@@ -1,0 +1,87 @@
+{
+
+  "platform": "Windows x64, MSVC ABI",
+
+  "qt": {"version": "6.8.3", "architecture": "win64_msvc2022_64", "installer": "aqtinstall==3.3.0", "modules": ["qtmultimedia"], "archives": ["qtbase", "qtdeclarative", "qtshadertools", "qtsvg", "qttools"]},
+
+  "livekit_cpp": {
+
+    "version": "1.12.3",
+
+    "url": "https://github.com/livekit/client-sdk-cpp/releases/download/v1.12.3/livekit-sdk-windows-x64-1.12.3.zip",
+
+    "sha256": "81c39cb1469d873a657a1931ad40ead7cfc42d337d61b56de57a16beb95f8a70"
+
+  },
+
+  "local_livekit_server": {
+
+    "version": "1.13.10",
+
+    "url": "https://github.com/livekit/livekit/releases/download/v1.13.10/livekit_1.13.10_windows_amd64.zip",
+
+    "sha256": "fd4b7c2c3c1e4c71adaa4f6a046ad1c0abaaaf1e09fae904b35bf231ffae11d2"
+
+  },
+
+  "local_clock_server_experiment": {"version": "1.13.10", "source_url": "https://codeload.github.com/livekit/livekit/zip/refs/tags/v1.13.10", "source_sha256": "fb1ef71d2a339c19d80a0aba16f3378a6558f4fe2a0b6c89f718f8a0922c9de6", "go_version": "1.26.1", "go_mod_sha256": "6521db4db45f8b0a1f8b2a314b89c4d35c2db3fd72a417036a374eec6829b2b5", "go_sum_sha256": "bd59b83446453df21c1e81687f321b5ae86665ee507e9a0f405d4c19651e0d85", "build": "scripts/build-clock-server.ps1", "experimental_only": true, "patch": "patches/livekit-server-v1.13.10-rtcp-experiment.patch", "patch_sha256": "b742b88de5fa8b775a8fb10d4ec22c2f523e5ae74d5cc00d126c40549118bb29"},
+
+  "active_livekit_sdk": {
+
+    "flavor": "GoodSharing patched wrapper and engine, based on C++ 1.12.3",
+
+    "install_directory": ".deps/livekit-patched",
+
+    "build": "scripts/build-patched-sdk.ps1 -TestShutdown",
+
+    "cpp_source": {"revision": "80130a2", "url": "https://codeload.github.com/livekit/client-sdk-cpp/zip/80130a2", "sha256": "afd41a64247fb6faf76e6d4e4e63e7697eb998061dbe46bfb521796706e45bf4"},
+
+    "rust_source": {"revision": "a6f93a16", "ffi_version": "0.12.82", "url": "https://codeload.github.com/livekit/rust-sdks/zip/a6f93a16", "sha256": "d361ab5562481869f0f1aeaa588bd811ab8a26abeb96fedde5000b9d783c05e0", "cargo_lock_sha256": "dad2c0595fa985573849d2ade041093c58e88edf64abe2721d92a62f42482d3e"},
+
+    "patches": {"patches/livekit-cpp-1.12.3-stereo-build.patch": "af958781d870894ba7a6c6b0debd3fe03c075cee4876c539bbfd1e8a7265841f", "patches/livekit-rust-a6f93a16-shutdown.patch": "caed43fa4d1e271bdd9029d5e227065c6d8188710ad2d4b8b5d677c0bebb01ab", "patches/webrtc-89d790b-frame-crypto.patch": "e2d4db08058a5a84194ccf06d42a867fd009716e6b2697848b1df15b5cf27104", "patches/webrtc-89d790b-receiver-clock.patch": "c42c949be8d1f30b0f2b101acf7244cda21fdd49e964bf458cff23b3a4b10a98"},
+
+    "cpp_dependencies": {
+
+      "protobuf": {"version": "25.3", "sha256": "d19643d265b978383352b3143f04c0641eea75a75235c111cc01a1350173180e"},
+
+      "abseil": {"version": "20240116.2", "sha256": "733726b8c3a6d39a4120d7e45ea8b41a434cdacde401cba500f14236c49b39dc"},
+
+      "spdlog": {"version": "1.15.1", "sha256": "25c843860f039a1600f232c6eb9e01e6627f7d030a2ae5e232bdd3c9205d26cc"},
+
+      "nlohmann_json": {"version": "3.12.0", "sha256": "42f6e95cad6ec532fd372391373363b62a14af6d771056dbfc86160e6dfff7aa"}
+
+    },
+
+    "native_dependencies": {
+
+      "webrtc_receiver_clock_sources": {"audio/channel_receive.cc": {"revision": "89d790b", "url": "https://raw.githubusercontent.com/webrtc-sdk/webrtc/89d790b/audio/channel_receive.cc", "sha256": "4b30d85289fbc98fa9a798385d9170358d04ddbefd9825da24785d4227bf1647", "normalized_header_sha256": "b24fe8db4930e2f7ef8f60fa5833890c6ca7266f0205d5c492b9c92f30590c04"}, "video/rtp_video_stream_receiver2.cc": {"revision": "89d790b", "url": "https://raw.githubusercontent.com/webrtc-sdk/webrtc/89d790b/video/rtp_video_stream_receiver2.cc", "sha256": "a032c1c3bdeb7bf4afe8a63775b5230253b7f1306037c2040bd97e8b20c28c55", "normalized_header_sha256": "407af95cc2339c9ea96cfb7c79cfcb6476766b003060420932edd67006306e4b"}},
+      "webrtc_cryptor_source": {"revision": "89d790b", "url": "https://raw.githubusercontent.com/webrtc-sdk/webrtc/89d790b/api/crypto/frame_crypto_transformer.cc", "sha256": "a0ad0713525437fd53dd23127e10a093442a4e7f827f22bd0b54907626c582da", "normalized_header_sha256": "c9215ff1d839adce5147f75e31f6a229cc36d2cfaef6bbfe44aeab19f74f84f9"},
+
+      "webrtc": {"release": "webrtc-89d790b", "url": "https://github.com/livekit/rust-sdks/releases/download/webrtc-89d790b/webrtc-win-x64-release.zip", "sha256": "5c2349c960bae4f06f71c102f58552d0d09c912a142811acfcadfb7c883cbf58"},
+
+      "libyuv": {"revision": "917276084a49be726c90292ff0a6b0a3d571a6af", "url": "https://chromium.googlesource.com/libyuv/libyuv/+archive/917276084a49be726c90292ff0a6b0a3d571a6af.tar.gz", "sha256": "f49388bdc38853e32c2f4d8b3f67339faf2f722a653ae5701181a83eeeaad057", "consumers": ["yuv-sys inside the patched LiveKit engine", "GoodSharing capture conversion, statically compiled"], "app_build": "scripts/prepare-libyuv.ps1"}
+
+    },
+
+    "build_tools": {
+
+      "rust_toolchain": "1.97.1",
+
+      "rust_scope": "project-local .tools/cargo and .tools/rustup; no system PATH/default changes",
+
+      "protoc": {"version": "25.3", "sha256": "d6b336b852726364313330631656b7f395dde5b1141b169f5c4b8d43cdf01482"},
+
+      "libclang": {"version": "18.1.1", "archive": "libclang-18.1.1-py2.py3-none-win_amd64.whl", "sha256": "4dd2d3b82fab35e2bf9ca717d7b63ac990a3519c7e312f19fa8e86dcc712f7fb"}
+
+    },
+
+    "artifact_hashes": "Installed wrapper-patch-info.json and engine-build-info.json; verified before app builds",
+
+    "distribution_status": "Requirements recorded in third_party/README.md; release packaging/source obligations remain open"
+
+  },
+
+  "tested_toolchain": {"msvc": "19.51.36248.0", "windows_sdk": "10.0.26100.0", "python": "3.13.13", "rust": "1.97.1", "libclang": "18.1.1"}
+
+}
+

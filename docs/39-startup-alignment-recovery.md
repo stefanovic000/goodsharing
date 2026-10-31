@@ -1,0 +1,51 @@
+# Bounded audio/video recovery
+
+Date: 2026-10-22, Europe/Budapest. Local PC tests use the owned fixture window and generated stereo tones. Normal UI audio remains disabled. This increment addresses a reproduced reset storm and tests a small device-headroom adjustment; it does not declare all historical recovery failures resolved.
+
+## Reproduction and scheduling change
+
+The preceding build sometimes plays normally, then repeatedly anchors video and discards that anchor when the next audio block cannot fit its startup alignment. A retained baseline repeat finishes with reset serial 539 and 259 alignment rejections. In these events the original audio timestamp is too far behind the latest video to schedule that PCM twenty milliseconds ahead while keeping video within the existing 80 ms limit. Repeating the same failed transaction cannot make that block fit.
+
+Two deterministic native controls reproduce the defect before the fix. The core control repeatedly supplies fresh video and audio that would require an illegal alignment; the old path destroys the video timeline on the first rejected block. The paired device/presentation control also loses its valid picture ticket. Both failures are retained in `artifacts/recovery-before2.log`.
+
+Before the first successful media commit on a timeline, an audio block requiring more than 80 ms video lead is now rejected and any queued startup PCM discarded. The valid video clock and its tickets remain unchanged. The rejected audio timestamp becomes the ordering high-water mark, so the same or older input cannot be replayed. Fresh PCM can subsequently fit the existing timeline or request one legal common-clock adjustment, with the usual reset fence for that adjustment. No rejected PCM reaches output. No additional PCM queue or recovery timer is introduced.
+
+This applies only to startup/alignment recovery before media has committed. Established playback still trims isolated late samples, resets after three consecutive blocks with insufficient headroom, and requires fresh permitted presentation when timing is invalidated. Invalid/missing clock evidence, epoch changes, stale video, revocation and failed device reset keep their existing behavior. Clock metadata remains separate from encryption permission.
+
+The native controls check fifty consecutive rejections without a clock/device reset storm, no readiness lock or queued rejected PCM, exact fresh samples on their original deadline, a separate legal realignment requiring exactly one new serial, stale-clock expiry, and paired presentation/device admission. The existing future-PCM, quality-handover, wrong-owner/generation and revocation-race checks remain.
+
+## Separate device-headroom experiment
+
+A longer 58-second cancellation observation finds a different failure: a short device discontinuity produces a 120 ms quiet interval after cancellation, while startup alignment rejection and sustained low-headroom counters stay zero. The device reports a clock-query bridge maximum just above two milliseconds. The per-track audio jitter-buffer interval means in that run reach 40 ms; they do not establish an excessive SDK buffer as its cause. Cancellation itself completes before the gap. That result remains a failure.
+
+The device first-sample fill target is now 20 ms instead of 15 ms, giving five milliseconds more scheduling headroom. The hard first-sample lead limit remains 30 ms, the PCM ring/residence limits remain 60 ms, and the source A/V horizon remains 80 ms. This is an explicit latency tradeoff of up to five milliseconds at that fill target, not a larger unbounded buffer. It adds no buffer allocation. The scheduler still waits for future PCM on its original deadline and shortens writes at known PCM tails; increasing the target does not permit committing early silence over still-timely PCM.
+
+The SDK, NetEq policy, codec, capture paths, anti-cheat-facing APIs and MMCSS scheduling policy are unchanged. A finite passing repeat cannot prove that the five-millisecond adjustment eliminates every scheduling underrun.
+
+## Reject a modestly early video frame without resetting audio
+
+The first 20 ms headroom experiment passes the longer static-to-motion case, but the new complete-session observation rejects the cancellation run: its longest quiet interval is 601 ms even though overall media-window coverage remains about 96.6%. The later trace shows a fresh same-epoch video frame whose projected deadline is 80.202 ms ahead of arrival. The old path reanchors both outputs because this exceeds 80 ms, discarding good PCM and picture tickets. Subsequent audio alignment repeats the interruption.
+
+A new deterministic before-change control reproduces that reset and is retained in `artifacts/recovery-early-before2.log`. Coordinated playback now drops a same-epoch frame that projects between 80 and 100 ms ahead while the current video clock is still fresh. It preserves the common anchor, queued PCM and reset serial. It neither buffers the rejected frame nor refreshes video lifetime or presentation age. A following in-budget frame can resume on the original timeline. Epoch changes, larger early discontinuities, late clocks and stale video retain their reset behavior. The existing 80 ms audio/presentation gates still stop output if no fresh permitted picture follows.
+
+The control checks exact 80 ms admission, a slightly over-limit rejection without PCM loss or serial change, exact fresh PCM on its old deadline, the next in-budget frame, and retained epoch/large-jump/stale-clock reset fences. One counter records early-frame drops, adding eight bytes to the fixed core; no queue is added. The maximum scheduling lead of an admitted video frame remains 80 ms. Dropping a frame can reduce instantaneous picture cadence; preserving a valid timeline avoids a much longer interruption of both outputs.
+
+## Observing complete sessions
+
+The owned audio observer now accumulates a fixed-size continuous-tone observation from the first heard sample until the existing pre-stop cutoff. Besides the recent spectrum and individual switch intervals, ordinary A/V cases require at least 95% observed-frame coverage, at most 5% quiet samples and no observed quiet run over 40 ms across this whole interval. Intentional source closure, wrong keys and the deliberately blocked-paint case retain their appropriate separate checks. These generated-tone assertions are test-only and are not applied to naturally quiet application audio.
+
+The test runner also supports 18–58 second watch durations with a matching owned fixture lifetime. A default case's duration is unchanged. New timing diagnostics retain at most sixteen reset/alignment events, including original/prospective deadlines, clock-report validity and counter effects. Rejected alignment events can now explicitly show an unchanged serial. Optional per-track statistics collect one bounded batch per second, at most sixty snapshots, plus sender rate samples. An earlier room-level query returned no media data; that unavailable measurement is preserved and was replaced with actual track statistics. No SDK buffering change was justified from empty statistics.
+
+These are software/device and own-process loopback observations. They do not measure physical display scanout, acoustic synchronization or Internet performance. Startup silence before the first heard tone is not part of the continuous-tone interval; startup readiness remains separately checked.
+
+## Verification
+
+All 22 native tests pass. The complete candidate matrix has **25 passes out of 30 cases**: 9/13 encrypted A/V cases, 6/6 normal video-only cases, 5/5 standalone endpoint cases, 4/4 managed-transport cases and 1/2 longer observations. The five failures remain failures under their original assertions.
+
+The final longer static-to-motion run observes about 51.75 seconds after the first heard tone, essentially complete capture coverage and a 5.625 ms maximum quiet run. Its serial stays three, with no device-gap reset or alignment rejection. The longer cancellation run never becomes ready: it commits no media, has no picture presentation and stays at serial one, with no alignment rejection or early-frame drop. It records 5,946 unclocked inputs and ends with 30 kbps sender targets. The independent audio jitter-buffer interval means remain around 30 ms. This is missing usable clock/transport evidence, not a reset caused by either newly fixed branch; the precise upstream cause remains unverified.
+
+The full matrix also fails the final stereo check after the intentional paint stall, static-to-motion recovery, the static interval before source closure, and the whole-session gap check after a normal round trip. That round trip passes its individual switch intervals but later has a 141.5 ms quiet run. Its early-frame drop counter reaches nine, demonstrating that the new rejection path is exercised, while other recovery triggers still interrupt playback. These results do not justify enabling normal UI audio or declaring the historical bandwidth/clock failures resolved. The 20 ms target experiment has not established reliable recovery; restore the previous target in the next diagnostic increment rather than treating it as an accepted latency increase.
+
+The [validation record](../artifacts/20261022-alignment-recovery-validation.json), [source archive](../artifacts/20261022-alignment-recovery-source.zip) and [binary archive](../artifacts/20261022-alignment-recovery-binaries.zip) retain this failed acceptance candidate, including all preceding diagnostics. They are a reproducible checkpoint, not a release. The fixed core is 11,944 bytes. Snapshot verification checks current hashes, both archives and the preceding frozen GUI-handover evidence/archives. A blocked attempt to copy the SDK DLL during an earlier active test batch is recorded; SDK hashes are unchanged, and the final candidate was rebuilt and retested only after that batch completed. Final auditing is read-only and finds no remaining executable from this workspace.
+
+Next continue clock/device recovery, longer synchronization/load and footprint validation before enabling normal UI audio. No VPS service was deployed and no unrelated application was closed.
