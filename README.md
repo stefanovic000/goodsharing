@@ -2,7 +2,7 @@
 
 A Windows screen-sharing client: share a window or a whole display with audio, and watch someone else's, through a **self-hosted LiveKit SFU** with end-to-end encryption. No peer-to-peer, no third-party service, no account system — a server you own and two clients.
 
-![The GoodSharing window](docs/images/ui.png)
+![GoodSharing sharing and watching a screen](docs/images/demo.webp)
 
 ## Why it exists
 
