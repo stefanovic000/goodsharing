@@ -44,3 +44,6 @@ desktop.ini
 
 # Local build binaries
 *.exe
+
+# Agent working notes (not part of the project)
+AGENTS.md

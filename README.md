@@ -84,6 +84,16 @@ Known limitations, in priority order:
 4. **Not code-signed**, so SmartScreen warns on first run.
 5. **Token issuance is manual** — room tokens are minted out of band; a production deployment needs an auth service and per-room key distribution.
 
+## A few words from me
+
+I am not a professional developer. I built this because I could not find a simple way to show my screen to someone without giving an account to a company, and because I wanted to learn how this stuff actually works.
+
+It took a lot of time. Most of it was not writing features, it was finding out why the sound stopped after ten seconds, why the window disappeared, why the picture flickered when the internet hiccuped. Every time something broke I tried to understand it properly instead of hiding it, and that is what most of the `docs/` folder is.
+
+It is not finished and I know exactly where it is not finished (see the list above). The server is one I rent and configured myself, the code is written by me with the help of an AI assistant, and it works between my desktop and an old laptop.
+
+If you look at this project for a job: the interesting part is not that it shares video, it is the documentation of the failures and how each one was traced down.
+
 ## Documentation
 
 The `docs/` folder contains the engineering log: capture and encoding decisions, the A/V scheduling model, the crash postmortems, remote SFU deployment, and the measurement methodology. `docs/69-crash-synthetic-tickets.md` is a good example of the debugging standard used throughout — every claim backed by a measurement.
