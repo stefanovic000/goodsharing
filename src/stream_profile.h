@@ -21,11 +21,11 @@ struct StreamTiming {
 
 inline StreamTiming streamTiming(StreamProfile profile) {
     switch(profile) {
-    case StreamProfile::LowLatency: return {25000,80000,4000,120000};
-    case StreamProfile::Smooth: return {80000,120000,4000,250000};
+    case StreamProfile::LowLatency: return {45000,80000,4000,120000};
+    case StreamProfile::Smooth: return {55000,110000,4000,250000};
     case StreamProfile::Balanced: break;
     }
-    return {30000,80000,4000,150000};
+    return {55000,90000,4000,150000};
 }
 
 inline const char* streamProfileName(StreamProfile profile) {

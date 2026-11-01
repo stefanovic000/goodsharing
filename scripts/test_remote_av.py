@@ -396,7 +396,7 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
         view, send = (json.loads((folder / name).read_text()) for name in ('viewer.json', 'sender.json'))
         # Lead/wait follow the profile: low 25/60, balanced 60/120, smooth 150/250.
         profile_name = 'smooth' if (case == 'smooth' or args.profile == 'auto') else (args.profile or 'balanced')
-        profile_lead = {'low': 40, 'balanced': 80, 'smooth': 200}[profile_name]
+        profile_lead = {'low': 90, 'balanced': 100, 'smooth': 120}[profile_name]
         profile_fill = .90 if case == 'smooth' else .95
         video = view.get('video') or view.get('last_selection', {}).get('video', {})
         playback = view.get('playback') or view.get('last_selection', {}).get('playback', {})
