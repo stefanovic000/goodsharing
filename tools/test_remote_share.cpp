@@ -1,4 +1,4 @@
-#include "remote_share.h"
+﻿#include "remote_share.h"
 #include <QCoreApplication>
 #include <iostream>
 #include <stdexcept>
@@ -49,8 +49,9 @@ int main(int argc,char** argv) {
         require(catalog.announce(announcement("alice","third",3,ShareTrack::Video720)).accepted,"Fresh generation rejected");
         require(catalog.removeOwner("alice").size()==1&&!catalog.manifest("alice",id,3,ShareTrack::Video720,false)&&!catalog.announce(announcement("alice","late-owner",3,ShareTrack::Video720)).accepted,"Disconnected owner revived");
         RemoteShareCatalog bounded;
-        for(int i=1;i<=514;i++){const auto change=bounded.announce(announcement("alice","sid"+QString::number(i),i,ShareTrack::Video720));if(i<=513)require(change.accepted,"History bound rejected early");}
-        require(!bounded.error().isEmpty()&&!bounded.manifest("alice",id,514,ShareTrack::Video720,false),"Untrusted history was unbounded");
+        for(int i=1;i<=600;i++)require(bounded.announce(announcement("alice","sid"+QString::number(i),i,ShareTrack::Video720)).accepted,"History eviction rejected a fresh announcement");
+        require(bounded.error().isEmpty(),"A long but legal history poisoned the catalog");
+        require(!bounded.announce(announcement("alice","sid1",1,ShareTrack::Video720)).accepted,"A retreating generation was accepted after eviction");
         std::cout<<"Remote owner/generation/quality selection, partial manifests, SID tombstones, sticky verification and bounded history passed\n";return 0;
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

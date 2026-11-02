@@ -47,7 +47,7 @@ bool ShareInput::audio(ShareAudioInput block) {
         chunk.timestampUs=pendingStartUs_;
         pendingSamples_.erase(pendingSamples_.begin(),pendingSamples_.begin()+960);
         pendingStartUs_+=10000; // 480 frames at 48 kHz
-        if(audioQueue_.size()>=32){audioQueue_.pop_front();overflowAudioDrops_++;if(!firstAudioPressureUs_)firstAudioPressureUs_=now;}
+        if(audioQueue_.size()>=audioCapacityBlocks){audioQueue_.pop_front();overflowAudioDrops_++;if(!firstAudioPressureUs_)firstAudioPressureUs_=now;}
         audioQueue_.push_back(std::move(chunk));
         audioHighWater_=std::max(audioHighWater_,audioQueue_.size());
         queued=true;
@@ -79,7 +79,7 @@ QJsonObject ShareInput::report()const {
             {"audio_high_water_ms",static_cast<int>(audioHighWater_*10)},{"replaced_raw_frames",static_cast<double>(replaced_)},
             {"rejected_video",static_cast<double>(rejectedVideo_)},{"rejected_audio",static_cast<double>(rejectedAudio_)},
             {"overflow_audio_drops",static_cast<double>(overflowAudioDrops_)},{"expired_audio_drops",static_cast<double>(expiredAudioDrops_)},
-            {"first_audio_pressure_us",static_cast<double>(firstAudioPressureUs_)},{"audio_capacity_ms",100},{"maximum_audio_residence_ms",100}};
+            {"first_audio_pressure_us",static_cast<double>(firstAudioPressureUs_)},{"audio_capacity_ms",static_cast<int>(audioCapacityBlocks*10)},{"maximum_audio_residence_ms",100}};
 }
 SharePublisher::SharePublisher(livekit::Room& room,Config config,std::shared_ptr<ShareInput> input,Observers observers)
     :room_(room),config_(std::move(config)),input_(std::move(input)),gate_(input_?input_->gate():nullptr),observers_(std::move(observers)) {

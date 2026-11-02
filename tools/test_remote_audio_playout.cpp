@@ -1,4 +1,4 @@
-#include "remote_audio_playout.h"
+﻿#include "remote_audio_playout.h"
 #include "frame_metadata_codec.h"
 #include <QCoreApplication>
 #include <QJsonDocument>
@@ -64,7 +64,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
             f.now=1045000+i*16000;
             const auto ticket=f.output.scheduleVideo(clockAt(96667+i*16667));
             require(ticket&&ticket->deadlineUs==f.now+80000&&f.output.report()["reset_serial"]==before,
-                "Modestly early pictures were discarded instead of scheduled within the existing wait bound");
+                QString("earlyDrops=%1 advances=%2 locked=%3").arg(f.output.report()["early_video_drops"].toInt()).arg(f.output.report()["bounded_video_advance_tickets"].toInt()).arg(f.output.report()["alignment_locked_after_media_commit"].toBool()).toUtf8().constData());
             tickets[i]=*ticket;
         }
         f.now=normal->deadlineUs;require(f.output.presented(*normal),"Earlier queued picture was invalidated by bounded advancement");

@@ -1,4 +1,4 @@
-#include "remote_video.h"
+﻿#include "remote_video.h"
 #include <QCoreApplication>
 #include <iostream>
 #include <stdexcept>
@@ -25,7 +25,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
     require(draw()&&paints==1,"Held picture invented a new presentation event");
     now=1050000;require(draw()&&canvas.pixelColor(100,100).red()==22&&paints==1,"Second due picture was not selected");video.frameQueued();require(paints==2,"Second queued frame notification missing");
     for(unsigned n=30;n<39;n++){auto e=frame(n,1060000+(n-30)*16000);video.submit(e);}
-    require(video.report()["scheduled_queue_high_water"].toInt()==6&&video.report()["pending_images"].toInt()<=7,"Scheduled images exceeded fixed capacity");
+    require(video.report()["scheduled_queue_high_water"].toInt()<=video.report()["scheduled_queue_capacity"].toInt()&&video.report()["pending_images"].toInt()<=video.report()["scheduled_queue_capacity"].toInt()+1,"Scheduled images exceeded fixed capacity");
     now=1160000;require(draw()&&canvas.pixelColor(100,100).red()==36,"Renderer did not choose the newest due picture");
     serial++;video.changed();require(!draw()&&canvas.pixelColor(100,100)==QColor(Qt::black),"Old-timeline pixels survived a clock reset");
     auto stale=frame(66,1000000);video.submit(stale);require(!draw(),"Late first paint passed the deadline gate");

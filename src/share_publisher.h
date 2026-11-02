@@ -44,6 +44,11 @@ private:
     std::condition_variable_any audioReady_;
     bool closed_=false;
     std::optional<ShareVideoInput> latest_;
+    // The sender queue's capacity is its residence: 100 ms of 10 ms blocks. A
+    // larger capacity can never fill, because discardExpiredAudio removes anything
+    // older than 100 ms first, which made the overflow path unreachable and let the
+    // backlog bound drift away from the reported audio_capacity_ms.
+    static constexpr std::size_t audioCapacityBlocks=10;
     std::deque<ShareAudioInput> audioQueue_;
     // Incoming capture packets are re-chunked to exact 10 ms blocks.
     std::vector<std::int16_t> pendingSamples_;std::uint64_t pendingStartUs_=0;

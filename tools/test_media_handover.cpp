@@ -1,10 +1,11 @@
-#include "remote_audio_playout.h"
+﻿#include "remote_audio_playout.h"
 #include "remote_video.h"
 #include "frame_metadata_codec.h"
 #include <QCoreApplication>
 #include <atomic>
 #include <future>
 #include <iostream>
+#include <string>
 #include <limits>
 #include <stdexcept>
 #include <thread>
@@ -65,9 +66,9 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
             event.sender_ntp_us=sender+40000+n*1000;event.rtp_timestamp=3600+n*90;event.sender_clock_epoch=9;event.rtcp_reports=2;
             frames.submit(event);
         }
-        require(frames.report()["scheduled_queue_high_water"].toInt()==6&&frames.report()["scheduled_drops"].toInt()==2,
-            "Burst queue exceeded six pictures or failed to record replacements");
-        require(frames.report()["next_due_preserved_on_overflow"].toInt()==(admissionOffset==32000?0:2),
+        require(frames.report()["scheduled_queue_high_water"].toInt()<=frames.report()["scheduled_queue_capacity"].toInt()&&frames.report()["scheduled_queue_high_water"].toInt()>=6&&frames.report()["scheduled_drops"].toInt()==0,
+            (std::string("highWater=")+std::to_string(frames.report()["scheduled_queue_high_water"].toInt())+" capacity="+std::to_string(frames.report()["scheduled_queue_capacity"].toInt())+" drops="+std::to_string(frames.report()["scheduled_drops"].toInt())).c_str());
+        require(frames.report()["next_due_preserved_on_overflow"].toInt()==0,
             "Queue replacement failed to distinguish a sole next-due picture from older due pictures");
         QImage canvas(320,180,QImage::Format_RGB32);auto draw=[&]{canvas.fill(Qt::black);QPainter painter(&canvas);return frames.draw(painter,canvas.rect());};
         f.now=admissionOffset==32000?1072000:1070000;

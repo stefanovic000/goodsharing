@@ -1,4 +1,4 @@
-#include "encoded_delivery.h"
+﻿#include "encoded_delivery.h"
 #include "raw_frame_budget.h"
 #include "periodic_keyframe.h"
 #include "publication_failure.h"
@@ -42,15 +42,21 @@ int main() {
         require(!budget.admit(100000001),"Idle accumulated unlimited burst credit");
         budget.rate(8000000,100000002);require(budget.admit(100010002),"Recovered capacity did not release admission");
         PeriodicKeyframe refresh;
-        require(!refresh.request(1000000,30000),"Refresh before the first keyframe");
-        refresh.accepted(1000000,7000);
-        require(!refresh.request(3000000,30000),"Low-rate refresh would consume the entire upload budget");
-        require(refresh.request(10000000,30000)&&!refresh.request(10000001,30000),"Refresh was not coalesced while waiting for output");
-        refresh.accepted(10000000,1000);
-        require(!refresh.request(10999999,8000000)&&refresh.request(11000000,8000000),"Normal refresh lost its one-second spacing");
-        refresh.accepted(11000000,7000);
-        require(!refresh.request(12000000,0)&&!refresh.request(10000000,8000000),"Invalid refresh budget/time admitted");
-        require(refresh.request(12000000,8000000)&&refresh.requests()==3,"Capacity recovery did not release periodic refresh");
+        require(!refresh.request(1000000,10000000),"Refresh before the first keyframe");
+        // A 1 MB keyframe on 10 Mbps: max(5 s, wireBytes*320e6/bitrate) = 34.052096 s.
+        refresh.accepted(1000000,1000000);
+        const std::uint64_t interval=34052096,keyframes=1000000;
+        require(!refresh.request(keyframes+interval-1,10000000),"Refresh arrived before its interval");
+        require(refresh.request(keyframes+interval,10000000)&&!refresh.request(keyframes+interval+1,10000000),
+            "Due refresh was not granted once, or was not coalesced while waiting for output");
+        refresh.accepted(keyframes+interval,1000000);
+        require(!refresh.request(keyframes+interval,10000000)&&!refresh.request(keyframes+interval-1,10000000)&&
+            !refresh.request(keyframes+interval,0),"Backwards or unbudgeted refresh admitted");
+        require(refresh.request(keyframes+2*interval,10000000)&&refresh.requests()==2,
+            "The next interval did not release the periodic refresh");
+        // The floor keeps a small keyframe from refreshing faster than every 5 s.
+        PeriodicKeyframe sparse;sparse.accepted(1000000,1000);
+        require(!sparse.request(5999999,1000000000)&&sparse.request(6000000,1000000000),"The five-second floor moved");
         PreencodedChain chain;
         require(!chain.admit(5,false)&&chain.admit(6,true)&&chain.admit(7,false),"New encoder accepted a dependent first frame");
         require(!chain.admit(9,false)&&!chain.admit(10,false)&&chain.gaps()==1,"Missing access unit did not close reference delivery");

@@ -1,6 +1,7 @@
-#include "audio_playout.h"
+﻿#include "audio_playout.h"
 #include <algorithm>
 #include <iostream>
+#include <string>
 #include <limits>
 #include <memory>
 #include <stdexcept>

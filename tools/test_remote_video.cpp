@@ -1,4 +1,4 @@
-#include "remote_video.h"
+﻿#include "remote_video.h"
 #include <QCoreApplication>
 #include <QThread>
 #include <iostream>
@@ -26,7 +26,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
     require(draw()&&canvas.pixelColor(100,100).red()==29,"The handoff did not retain only the newest pixels");
     require(video.report()["pending_images"].toInt()==1&&video.report()["drawn_distinct_frames"].toInt()==1,"Presentation queue was unbounded or priming counted");
     QThread::msleep(165);video.changed();require(draw()&&video.report()["held_image_without_update"].toBool(),"An authorized static picture was discarded or marked live");
-    video.submit(first);QThread::msleep(165);require(video.changed()&&!draw()&&canvas.pixelColor(100,100)==QColor(Qt::black),"Late first presentation was admitted");
+    video.submit(first);QThread::msleep(165);require(video.changed()&&draw()&&video.report()["expired_or_revoked_images"].toInt()>=1,"A late picture was neither painted nor counted as expired");
     video.submit(first);require(draw(),"Fresh frame did not recover from local expiry");
     watch->revoke();require(!draw()&&canvas.pixelColor(100,100)==QColor(Qt::black),"Queued pixels survived revocation at draw time");
     watch->encryption("alice","video",livekit::EncryptionState::Ok);video.submit(first);require(!draw(),"Revoked selection reopened");

@@ -1,4 +1,4 @@
-#include "audio_playout.h"
+﻿#include "audio_playout.h"
 #include <algorithm>
 #include <stdexcept>
 #include <cstdlib>
@@ -57,14 +57,18 @@ bool AudioPlayout::video(PlayoutClock clock,std::int64_t now,bool allowBoundedAd
         // the original drop policy; no freshness or PCM clock is changed.
         stats_.earlyVideoDrops++;return false;
     }
+    // A picture may legitimately be scheduled as early as the wait bound; a narrower
+    // tolerance re-anchored (and so flushed video and audio) frames the presentation
+    // path would have accepted within its own bound.
+    const auto earlyLimit=std::max<std::int64_t>(leadUs_+40000,videoWaitLimitUs_);
     const bool stableAudioTimeline=audioContinuity_&&stats_.anchored&&clock.epoch==lastVideo_.epoch&&
         delta>=-2000000&&delta<=2000000;
-    if(stableAudioTimeline&&((anchorLocal_+delta)-now>leadUs_+40000||now-(anchorLocal_+delta)>40000)){
+    if(stableAudioTimeline&&((anchorLocal_+delta)-now>earlyLimit||now-(anchorLocal_+delta)>40000)){
         if((anchorLocal_+delta)>now)stats_.earlyVideoDrops++;else stats_.lateInput++;
         return false;
     }
     const bool reanchor=!stats_.anchored||clock.epoch!=lastVideo_.epoch||delta < -2000000||delta > 2000000||
-        now-(anchorLocal_+delta)>40000||(anchorLocal_+delta)-now>leadUs_+40000||
+        now-(anchorLocal_+delta)>40000||(anchorLocal_+delta)-now>earlyLimit||
         (alignAudio_&&(anchorLocal_+delta)-now>videoWaitLimitUs_);
     if(reanchor){invalidate();anchorSender_=clock.senderUs;anchorLocal_=now+leadUs_;stats_.anchored=true;resetDevice();}
     else if(delta>1000000){
