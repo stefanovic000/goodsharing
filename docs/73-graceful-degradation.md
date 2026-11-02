@@ -109,3 +109,31 @@ drop that starts partway through, `GOODSHARING_TEST_AUDIO_DROP` with
 the report showing the post-restart session, so the counter could not confirm the
 restart. The next attempt should trace SDK audio callbacks with timestamps rather than
 infer from counters, and should capture the failure live the next time it occurs.
+
+## Reliability campaign: twenty consecutive runs
+
+Two cases, ten runs each, 720p/30 fps, back to back on the same machine:
+
+| Case | Pass | Audio quiet | Coverage | Freezes | Worst hold |
+| --- | --- | --- | --- | --- | --- |
+| 720 (Balanced 150 ms) | 10/10 | 0 ms | 0.999-1.000 | 0-1 per run | 168-176 ms |
+| low (70 ms) | 10/10 | 0-9 ms | 0.985-1.000 | 0 | - |
+
+Twenty of twenty, with the only interruptions being single holds of about 175 ms in
+the Balanced case - below the 200 ms grace, so the catch-up does not even engage.
+That is the steady state this document is aiming for: occasional short stutter,
+no session that stops working.
+
+## Diagnosing the next silence
+
+The rare 3 s silence left no evidence about *why* audio stopped, only that it did. Two
+additions make the next one diagnosable:
+
+- `TrackReader` records when a stream read returns end-of-stream while the reader was
+  not asked to stop (`ended`, `ended_reason`, `reader_running`).
+- `ShareReceiver::report` now includes `live_readers`, so those flags are visible
+  while the session is still running rather than only after teardown.
+
+A healthy run reports `ended = false, reader_running = true`. If the silence recurs,
+the report will say whether the stream had ended (transport/subscription) or was still
+open with nothing arriving (decoded delivery).

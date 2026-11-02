@@ -1,4 +1,4 @@
-#include "track_reader.h"
+﻿#include "track_reader.h"
 #include "frame_metadata_codec.h"
 #include <QJsonArray>
 #include <QByteArray>
@@ -29,6 +29,7 @@ struct TrackReader::Impl {
     mutable std::mutex mutex;
     std::string error;
     QJsonObject completed;
+    bool ended=false; std::string endedReason;
     bool started=false;
     void failed(const char* message){std::lock_guard lock(mutex);error=message;}
 };
@@ -61,7 +62,9 @@ void TrackReader::startAudio(const std::shared_ptr<livekit::Track>& track,AudioC
     p.audio=livekit::AudioStream::fromTrack(track,options);
     p.reader=std::jthread([&p,callback=std::move(callback)](std::stop_token stop) {
         try {livekit::AudioFrameEvent event;while(!stop.stop_requested()) {
-            const auto begin=p.testTiming?nowUs():0;if(!p.audio->read(event)||stop.stop_requested())break;
+            const auto begin=p.testTiming?nowUs():0;
+            const bool read=p.audio->read(event);
+            if(!read||stop.stop_requested()){if(!read&&!stop.stop_requested()){std::lock_guard lock(p.mutex);p.ended=true;p.endedReason="audio stream ended";}break;}
             Impl::Timing timing;if(p.testTiming){timing=p.timing(event,begin);timing.samples=event.frame.samplesPerChannel();}
             callback(event);p.remember(timing);
         }}
@@ -94,5 +97,7 @@ void TrackReader::stop() {
     p.video.reset();p.audio.reset();
 }
 std::string TrackReader::error()const{std::lock_guard lock(impl_->mutex);return impl_->error;}
-QJsonObject TrackReader::report()const{std::lock_guard lock(impl_->mutex);return impl_->completed;}
+QJsonObject TrackReader::report()const{std::lock_guard lock(impl_->mutex);auto result=impl_->completed;
+    result["ended"]=impl_->ended;result["ended_reason"]=QString::fromStdString(impl_->endedReason);
+    result["reader_running"]=impl_->reader.joinable();return result;}
 }

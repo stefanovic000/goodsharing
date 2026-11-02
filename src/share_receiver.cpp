@@ -1,4 +1,4 @@
-#include "share_receiver.h"
+﻿#include "share_receiver.h"
 #include <QJsonArray>
 #include <atomic>
 #include <condition_variable>
@@ -122,6 +122,7 @@ std::string ShareReceiver::error()const{std::lock_guard lock(impl_->mutex);retur
 QJsonObject ShareReceiver::report()const {
     const auto& p=*impl_;std::lock_guard lock(p.mutex);int verified=0,revoked=0;QJsonArray tracks;
     for(const auto& [sid,permission]:p.permissions){verified+=permission->wasReady?1:0;revoked+=permission->revoked?1:0;tracks.append(QJsonObject{{"sid",QString::fromStdString(sid)},{"owner",QString::fromStdString(permission->owner)},{"verified",permission->wasReady},{"revoked",permission->revoked.load()}});}
-    return {{"verification_required",true},{"known_tracks",static_cast<int>(p.permissions.size())},{"verified_tracks",verified},{"revoked_tracks",revoked},{"tracks",tracks},{"completed_readers",p.completedReaders}};
+    QJsonArray liveReaders;for(const auto& [sid,reader]:p.readers)if(reader)liveReaders.append(QJsonObject{{"sid",QString::fromStdString(sid)},{"report",reader->report()}});
+    return {{"verification_required",true},{"known_tracks",static_cast<int>(p.permissions.size())},{"verified_tracks",verified},{"revoked_tracks",revoked},{"tracks",tracks},{"completed_readers",p.completedReaders},{"live_readers",liveReaders}};
 }
 }
