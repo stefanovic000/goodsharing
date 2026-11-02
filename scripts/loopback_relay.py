@@ -1,5 +1,6 @@
-"""Test-owned host-local UDP relay to loopback; no OS traffic rules."""
+﻿"""Test-owned host-local UDP relay to loopback; no OS traffic rules."""
 from collections import deque
+import random
 import selectors
 import socket
 import threading
@@ -35,7 +36,8 @@ class LoopbackRelay:
                           up_sent_bytes=0, down_sent_packets=0, down_sent_bytes=0,
                           age_dropped_packets=0, capacity_dropped_packets=0,
                           queue_high_water_bytes=0, queue_high_water_packets=0,
-                          maximum_sent_age_ms=0., rejected_flows=0, udp_reset_events=0)
+                          maximum_sent_age_ms=0., rejected_flows=0, udp_reset_events=0,
+                          loss_dropped_up=0, loss_dropped_down=0)
         self.history = []
         self.started = time.monotonic()
         self.worker = threading.Thread(target=self.run, name='owned-loopback-UDP-relay')
@@ -53,6 +55,17 @@ class LoopbackRelay:
             self.wake_write.send(b'w')
         except BlockingIOError:
             pass
+
+    def configure_loss(self, percent=0.0):
+        """Drop that share of datagrams in each direction; 0 disables loss.
+
+        This is real network loss: it happens before depacketisation, so FEC,
+        RED and NACK can recover it, unlike a post-decode frame drop."""
+        if not 0 <= percent <= 50:
+            raise ValueError("Use 0 to 50 percent loss")
+        with self.lock:
+            self.loss = percent / 100.0
+            self.history.append(dict(elapsed_s=time.monotonic()-self.started, loss_percent=percent))
 
     def snapshot(self):
         with self.lock:
@@ -110,6 +123,9 @@ class LoopbackRelay:
                                 upstream.setblocking(False)
                                 self.flows[address] = upstream
                                 self.selector.register(upstream, selectors.EVENT_READ, ('back', address))
+                            if self.loss and random.random() < self.loss:
+                                self.stats['loss_dropped_up'] += 1
+                                continue
                             self.stats['up_received_packets'] += 1
                             self.stats['up_received_bytes'] += len(data)
                             if self.queued_bytes + len(data) > self.byte_limit or len(self.queue) >= 8192:
@@ -120,6 +136,9 @@ class LoopbackRelay:
                             self.stats['queue_high_water_bytes'] = max(self.stats['queue_high_water_bytes'], self.queued_bytes)
                             self.stats['queue_high_water_packets'] = max(self.stats['queue_high_water_packets'], len(self.queue))
                         else:
+                            if self.loss and random.random() < self.loss:
+                                self.stats['loss_dropped_down'] += 1
+                                continue
                             try:
                                 self.front.sendto(data, client)
                             except ConnectionResetError as error:

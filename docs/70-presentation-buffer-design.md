@@ -374,3 +374,30 @@ keeps playing while the picture timeline stalls.
 With that, the loss and jitter cases in "Tests before it may be called done" both
 exist, and they say opposite things: jitter scales with the buffer, erasure does not
 scale with anything available here and needs FEC.
+## Why there is no network-level loss test yet
+
+The `--loss` impairment drops frames *after* decode, at the playout boundary. That
+matters for how far its result can be pushed: RED is already enabled on the audio
+publication (`options.red=true` in share_publisher.cpp) and NACK/FEC live below the
+decoder, so nothing in the transport layer can rescue a frame that was dropped after
+it. The 10% result therefore says "these profiles do not survive losing a tenth of
+their decoded media", not "FEC would not help".
+
+Reaching real packet loss needs the media to traverse an impairing hop. Two attempts
+failed on this host:
+
+- A UDP relay on `127.0.0.2:8765` (media forwarded to the SFU on `127.0.0.1:8765`)
+  coexists with the SFU's socket - verified directly - but the SFU only puts the
+  relay in the path when it advertises that address, and LiveKit's candidate filter
+  cannot advertise `127.0.0.2` because it is a loopback alias rather than a real
+  interface. With the filter set to `127.0.0.2/32` the offer has no usable
+  candidate and the session never starts (0 packets through the relay); without it,
+  media takes the direct `127.0.0.1` path (6 packets seen, all handshake).
+- Impairing inside the client instead would sit above the decoder again, which is
+  the limitation above.
+
+`scripts/loopback_relay.py` now has `configure_loss` (drops in both directions,
+counted per direction) and is tested for the addressing above; it becomes usable the
+moment the media path can be forced through it - an OS packet filter, a second
+machine, or a real remote SFU. That is the honest state of the FEC question: it is
+unmeasured, and RED is already doing what it can.
