@@ -199,3 +199,30 @@ Repeated measurements on a PC that had run several hundred media sessions in one
 coverage came out at 0.945 once and 0.969-0.992 on three immediate repeats, against a
 0.95 gate. That is the environment, not a regression, and it is worth remembering
 before treating a single 0.94-something as a product fault.
+
+## The minimized case, and what the evidence actually says
+
+Repeated runs of `--case minimized` with the owned windows hidden are unstable in a way
+the rest of the suite is not: batches gave 6/8, then 3/8, and 3/4 with visible windows.
+The failing runs share a signature - the viewer's track is *verified*, `reader_running`
+is true, `ended` is false, yet no frames arrive on either stream ("No new video frames ·
+picture may be static or stalled") while the sender admits ~1930 audio blocks. The stall
+is transport-level and affects audio and video together, so it is not the audio-delivery
+path and not something the buffer or the timeline can fix.
+
+Two hypotheses, both partly tested:
+
+- **The publisher process is minimized.** The harness passes `--test-window-minimized` to
+  the sender as well, and Windows 11 moves minimized processes to EcoQoS. With visible
+  windows, audio never failed in the sample. `SharePublisher::start` now opts the process
+  out of execution-speed throttling for the life of the process.
+- **It is start-up ordering under load.** The runs that fail tend to be ones where the
+  subscription and the publication race; the retry now has a 4 s cooldown and a third
+  attempt instead of spending both inside two seconds.
+
+Neither is proven. The batches above were taken on a PC that had run several hundred
+media sessions that day, and the variance between batches (6/8, then 3/8, then 3/4) is
+larger than any effect measured. The honest statement is that this configuration is
+unstable for reasons not yet isolated, that the two changes are plausible and harmless,
+and that the next measurement should be taken on a freshly booted machine with one case
+per boot rather than hundreds of runs in a row.

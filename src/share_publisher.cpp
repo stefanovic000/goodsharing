@@ -6,6 +6,26 @@
 #include <QJsonDocument>
 #include <algorithm>
 #include <limits>
+#include <windows.h>
+namespace {
+// A minimized Windows 11 process is moved to EcoQoS and throttled, which starves a
+// share of CPU exactly when the user hides the app. Share publishing opts out for
+// the lifetime of the process.
+void keepFullSpeedWhileSharing(){
+    static const bool once=[]{
+#ifdef _WIN32
+        PROCESS_POWER_THROTTLING_STATE state{};
+        state.Version=PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+        state.ControlMask=PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+        state.StateMask=0; // 0 disables the execution-speed throttle
+        return SetProcessInformation(GetCurrentProcess(),ProcessPowerThrottling,&state,sizeof(state))!=0;
+#else
+        return false;
+#endif
+    }();
+    (void)once;
+}
+}
 #include <stdexcept>
 
 namespace goodsharing {
@@ -93,6 +113,7 @@ bool SharePublisher::allowed(bool priming)const {
     return !gate_->closed()&&room_.connectionState()==livekit::ConnectionState::Connected&&manager&&manager->enabled()&&(priming||gate_->ready());
 }
 void SharePublisher::start() {
+    keepFullSpeedWhileSharing(); // a minimized window must not throttle the share
     if(started_)throw std::logic_error("A publisher is one-shot");started_=true;state_=State::Starting;
     try {
         if(gate_->closed()){stop();return;}
