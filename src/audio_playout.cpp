@@ -1,4 +1,4 @@
-﻿#include "audio_playout.h"
+#include "audio_playout.h"
 #include <algorithm>
 #include <stdexcept>
 #include <cstdlib>
@@ -12,10 +12,14 @@ std::int64_t ticks(std::uint32_t now,std::uint32_t before) {
 }
 std::int64_t sampleUs(std::size_t frames){return static_cast<std::int64_t>(frames)*1000000/48000;}
 }
-void AudioPlayout::configureTiming(std::int64_t leadUs,std::int64_t videoWaitLimitUs) {
-    if(leadUs<5000||leadUs>200000||videoWaitLimitUs<20000||videoWaitLimitUs>300000)
+void AudioPlayout::configureTiming(std::int64_t leadUs,std::int64_t videoWaitLimitUs,std::int64_t bufferUs) {
+    if(leadUs<5000||leadUs>200000||videoWaitLimitUs<20000||videoWaitLimitUs>300000||bufferUs<0||bufferUs>200000)
         throw std::invalid_argument("Invalid playout timing");
     leadUs_=leadUs;videoWaitLimitUs_=videoWaitLimitUs;
+    // A block must survive long enough to reach a deadline one buffer away, plus a
+    // 15 ms margin. The 60 ms constant stays the floor, so the shipped 45 ms profile
+    // keeps its tuned residence and only larger buffers widen it.
+    residenceUs_=std::max(maximumResidenceUs,bufferUs+15000);
 }
 bool PlayoutClock::valid()const{return hasRtp&&senderUs>0&&senderUs<=5000000000000000ll&&epoch>0&&reports>=2;}
 void AudioPlayout::resetDevice(){stats_.resetPending=true;if(++stats_.resetSerial==0)++stats_.resetSerial;stats_.resets++;lastOutputEnd_=0;}
@@ -119,7 +123,7 @@ bool AudioPlayout::audio(PlayoutClock clock,std::span<const std::int16_t> pcm,st
     auto deadline=anchorLocal_+delta+audioTimelineOffsetUs_;
     const auto nominalDeadline=deadline;
     const auto stride=ticks(clock.rtp,audioTailClock_.rtp),sourceStep=clock.senderUs-audioTailClock_.senderUs;
-    const bool freshTail=alignAudio_&&audioTailClock_.valid()&&clock.epoch==audioTailClock_.epoch&&now-audioTailArrival_<=maximumResidenceUs;
+    const bool freshTail=alignAudio_&&audioTailClock_.valid()&&clock.epoch==audioTailClock_.epoch&&now-audioTailArrival_<=residenceUs_;
     // A later valid SR can refine the NTP origin while retaining the epoch.
     // SenderReportClock already validates that update's slope/quantization.
     // Require close RTP/NTP agreement only within an unchanged reference;
@@ -152,7 +156,7 @@ bool AudioPlayout::audio(PlayoutClock clock,std::span<const std::int16_t> pcm,st
             }
             if(stats_.alignmentLocked&&!stats_.resetPending&&stats_.queued&&nominalDeadline>deadline&&
                correction<=maximumCadenceCorrectionUs+10000&&audioTailDeadline_>now+pcmWaitGuardUs&&
-               nominalDeadline-now<=maximumResidenceUs-10000){
+               nominalDeadline-now<=residenceUs_-10000){
                 // Compression can advance source time faster than output PCM.
                 // Preserve the queued tail and use this input's original common
                 // deadline. The bounded intervening gap renders as silence;
@@ -211,7 +215,7 @@ bool AudioPlayout::audio(PlayoutClock clock,std::span<const std::int16_t> pcm,st
     }
     if(deadline>now+100000){stats_.invalid++;invalidate();return false;}
     lastAudio_=clock;
-    if(deadline+10000<now-maximumResidenceUs){stats_.lateInput++;return false;}
+    if(deadline+10000<now-residenceUs_){stats_.lateInput++;return false;}
     consecutiveAlignmentRejected_=0;
     if(contiguous&&audioTailClock_.valid()){
         const auto correction=std::abs(deadline-(anchorLocal_+delta));
@@ -243,7 +247,7 @@ AudioPlayout::Render AudioPlayout::render(std::int64_t now,std::int64_t audible,
        (lastOutputEnd_&&audible<lastOutputEnd_-1000)){stats_.invalid++;invalidate();return result();}
     if(stats_.anchored&&!audioContinuity_&&now-lastVideoLocal_>videoLifetimeUs)invalidate();
     if(stats_.resetPending||!stats_.anchored)return result();
-    while(stats_.queued&&now-blocks_[head_].receivedUs>maximumResidenceUs){pop();stats_.expiredBlocks++;}
+    while(stats_.queued&&now-blocks_[head_].receivedUs>residenceUs_){pop();stats_.expiredBlocks++;}
     if(alignAudio_&&stats_.alignmentLocked&&audible-now>pcmWaitGuardUs){
         const bool unknownTail=!stats_.queued||blocks_[(head_+stats_.queued-1)%capacity].deadlineUs+10000<=audible;
         if(unknownTail){
@@ -268,7 +272,7 @@ AudioPlayout::Render AudioPlayout::render(std::int64_t now,std::int64_t audible,
         const auto at=audible+sampleUs(frame);
         while(stats_.queued){
             auto& block=blocks_[head_];
-            if(now-block.receivedUs>maximumResidenceUs){pop();stats_.expiredBlocks++;continue;}
+            if(now-block.receivedUs>residenceUs_){pop();stats_.expiredBlocks++;continue;}
             const auto due=block.deadlineUs+sampleUs(block.used);
             if(at-due>2000){
                 const auto skip=std::min(blockFrames-block.used,static_cast<std::size_t>(((at-due)*48000+999999)/1000000));

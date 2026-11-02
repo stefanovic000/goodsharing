@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <array>
 #include <atomic>
 #include <algorithm>
@@ -63,14 +63,18 @@ public:
     void resetTiming(){invalidate();}
     void enableAudioAlignment(){alignAudio_=true;}
     void enableAudioContinuity(){audioContinuity_=true;}
-    // Stream profile: common audio/video target lead and how long a due frame
-    // may wait before it is re-anchored. Must be set before the first frame.
-    void configureTiming(std::int64_t leadUs,std::int64_t videoWaitLimitUs);
+    // Stream profile: common audio/video target lead, how long a due frame may
+    // wait before it is re-anchored, and the presentation delay they are derived
+    // from. Must be set before the first frame.
+    void configureTiming(std::int64_t leadUs,std::int64_t videoWaitLimitUs,std::int64_t bufferUs=0);
     // Output gain applied to committed samples; 1.0 is unity, 0.0 is mute.
     void setGain(float gain){gain_=std::clamp(gain,0.0f,1.0f);}
     float gain()const{return gain_;}
     std::int64_t configuredLeadUs()const{return leadUs_;}
     std::int64_t configuredVideoWaitLimitUs()const{return videoWaitLimitUs_;}
+    // How long a decoded block may wait for its deadline. Follows the buffer so a
+    // larger presentation delay cannot expire its own backlog (docs/70 step 3).
+    std::int64_t configuredResidenceUs()const{return residenceUs_;}
     // Only after a successful final-permission device commit containing media.
     void mediaCommitted(){if(alignAudio_&&stats_.anchored)stats_.alignmentLocked=true;}
     void revoke(); // terminal; a new watch requires a new object
@@ -99,6 +103,7 @@ private:
     bool alignAudio_=false;
     bool audioContinuity_=false;
     std::int64_t leadUs_=30000,videoWaitLimitUs_=80000;
+    std::int64_t residenceUs_=maximumResidenceUs;
     float gain_=1.0f;
     unsigned consecutiveLate_=0;
     unsigned consecutiveAlignmentRejected_=0;

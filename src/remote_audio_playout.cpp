@@ -1,4 +1,4 @@
-#include "remote_audio_playout.h"
+﻿#include "remote_audio_playout.h"
 #include "frame_metadata_codec.h"
 #include <chrono>
 #include <cmath>
@@ -200,11 +200,11 @@ void RemoteAudioPlayout::configureTiming(std::int64_t leadUs,std::int64_t videoW
     std::lock_guard lock(mutex_);
     horizonUs_=std::max<std::int64_t>(80000,leadUs+40000);
     if(bound_)throw std::logic_error("Playout timing must precede binding");
-    core_.configureTiming(leadUs,videoWaitLimitUs);
     // The lead is the presentation delay (stream_profile.h derives one from the
     // other), so it doubles as the delayed-timeline buffer. The test hook keeps
     // the old source for an A/B control on the same binary.
     bufferUs_=qEnvironmentVariableIntValue("GOODSHARING_TEST_OLD_TIMELINE")?0:leadUs;
+    core_.configureTiming(leadUs,videoWaitLimitUs,bufferUs_);
 }
 std::optional<std::int64_t> RemoteAudioPlayout::delayedSender(std::int64_t now)const{
     if(!bufferUs_)return {};
@@ -425,7 +425,7 @@ QJsonObject RemoteAudioPlayout::report(bool includeTestHistory)const{
         {"queued_blocks",static_cast<int>(s.queued)},{"queue_high_water_blocks",static_cast<int>(s.highWater)},
         {"front_deadline_lead_ms",frontDeadline?(*frontDeadline-reportNow)/1000.0:0},
         {"tail_deadline_lead_ms",tailDeadline?(*tailDeadline-reportNow)/1000.0:0},
-        {"pcm_capacity_ms",60},{"maximum_pcm_residence_ms",60},{"target_video_lead_ms",core_.configuredLeadUs()/1000.0},
+        {"pcm_capacity_ms",core_.configuredResidenceUs()/1000.0},{"maximum_pcm_residence_ms",core_.configuredResidenceUs()/1000.0},{"target_video_lead_ms",core_.configuredLeadUs()/1000.0},
         {"maximum_endpoint_lead_ms",30},{"video_clock_lifetime_ms",150},{"scheduler_bytes",static_cast<double>(sizeof(AudioPlayout))},
         {"admitted_audio_blocks",static_cast<double>(s.admitted)},{"unclocked",static_cast<double>(s.unclocked)},
         {"invalid",static_cast<double>(s.invalid)},{"late_input_blocks",static_cast<double>(s.lateInput)},
