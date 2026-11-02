@@ -68,6 +68,11 @@ private:
     std::uint64_t pendingDrops_=0,nextDuePreserved_=0,unclocked_=0,timedDraws_=0;
     std::uint64_t cadenceCatchupDrops_=0;
     std::int64_t lastPresentationUs_=0;
+    // Arrival-to-paint residence per distinct picture: how long a picture the
+    // receiver already had waited for its presentation slot. Rises with the buffer,
+    // so it is the receiver-side half of the latency trade.
+    std::array<std::int64_t,512> residence_{};std::size_t residenceCount_=0,residenceCursor_=0;
+    std::int64_t maximumResidenceUs_=0;
     std::array<std::int64_t,512> lateness_{};std::size_t latenessCount_=0,latenessCursor_=0;
     std::int64_t maxLateness_=0;
     bool fastPaint_=qEnvironmentVariableIntValue("GOODSHARING_TEST_FAST_PAINT")!=0;

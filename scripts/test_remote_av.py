@@ -459,7 +459,8 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
                           bounded_common_video_lead=audio.get('maximum_aligned_video_lead_ms', 9999) <= profile_wait + 20,
                           bounded_video_presentation_wait=audio.get('maximum_video_presentation_wait_ms', audio.get('maximum_aligned_video_lead_ms', 9999)) <= profile_wait + 20,
                           bounded_video_presentation_advance=audio.get('maximum_video_presentation_advance_ms', 0) <= 20,
-                          bounded_draw_lag=video.get('recent_p95_draw_lateness_ms', 9999) <= 40)
+                          bounded_draw_lag=video.get('recent_p95_draw_lateness_ms', 9999) <= 40,
+            applied_presentation_delay=abs(video.get('paint_residence_p50_ms', 0) - (profile_lead - 25)) <= 40)
             if clock_profile in ('server-only-500ms', '500ms'):
                 tone = observed.get('continuous_tone_observation', {})
                 checks['first_tone_within_five_seconds'] = tone.get('started') is True and 0 < tone.get('first_tone_startup_ms', 9999) <= 5000

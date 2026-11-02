@@ -401,3 +401,28 @@ counted per direction) and is tested for the addressing above; it becomes usable
 moment the media path can be forced through it - an OS packet filter, a second
 machine, or a real remote SFU. That is the honest state of the FEC question: it is
 unmeasured, and RED is already doing what it can.
+## The latency the profiles actually cost (2026-11-02)
+
+The delay a profile applies is now measured, not assumed. `RemoteVideo` samples how
+long each distinct picture waited between arrival and paint, and the playback report
+carries `paint_residence_p50_ms`, `p95_ms`, `max_ms` and the sample count.
+
+720p, 30 fps, one run per profile:
+
+| Profile | Buffer | residence p50 | p95 | max |
+| --- | ---: | ---: | ---: | ---: |
+| Low | 45 ms | 71.0 | 71.9 | 78.3 |
+| Balanced | 150 ms | 150.1 | 161.2 | 170.5 |
+| Smooth | 300 ms | 303.0 | 310.3 | 317.9 |
+
+The measured residence tracks the configured buffer within ~20 ms (one encode/decode
+hop plus scheduling). A check, `applied_presentation_delay`, now requires the p50 to
+be within 40 ms of the profile's buffer, so a profile that silently stops applying its
+delay fails the run instead of passing on a stale number.
+
+This is the receiver-side half of the trade only. A glass-to-glass figure would need
+the sender's capture time in the receiver's clock domain; the capture stamp travels in
+the frame metadata but in the sender's own steady clock, which the playout cannot map
+(the attempted `localFor(captureTimestampUs)` produced zero samples before it was
+removed). Closing that needs the sender to publish a capture-to-NTP relation, which is
+a real protocol change rather than a measurement.
