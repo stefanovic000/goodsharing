@@ -1,6 +1,6 @@
 # GoodSharing
 
-A Windows screen-sharing client: share a window or a whole display with audio, and watch someone else's, through a **self-hosted LiveKit SFU** with end-to-end encryption. No peer-to-peer, no third-party service, no account system â€” a server you own and two clients.
+A Windows screen-sharing client: share a window or a whole display with audio, and watch someone else's, through a **self-hosted LiveKit SFU** with end-to-end encryption. No peer-to-peer, no third-party service, no account system — a server you own and two clients.
 
 ![GoodSharing sharing and watching a screen](docs/images/demo.webp)
 
@@ -14,25 +14,25 @@ Discord and OBS are either closed-source, require an account, or are built for s
 - **Watch** at 720p or 1080p, click a person to switch to their screen while still sharing your own
 - **Three latency profiles**: Low latency (45 ms buffer), Balanced (150 ms), Smooth (300 ms)
 - **30 or 60 fps**, hardware CBR encoding, two published tracks (1080p + 720p)
-- **E2EE** â€” one shared 64-hex key; a wrong key yields no picture, verified by test
-- **People panel** â€” per-person volume slider, stop watching, live "sharing" state
+- **E2EE** — one shared 64-hex key; a wrong key yields no picture, verified by test
+- **People panel** — per-person volume slider, stop watching, live "sharing" state
 - **Self-preview** toggle, floating share pill with the shared source name
-- **Portable** â€” a folder you can copy; settings live in `GoodSharing.ini` next to the exe
+- **Portable** — a folder you can copy; settings live in `GoodSharing.ini` next to the exe
 - Optional **per-user installer** with a clean uninstaller
 
 ## Architecture
 
 ```
  capture           encode                publish            transport
- â”€â”€â”€â”€â”€â”€â”€           â”€â”€â”€â”€â”€â”€                â”€â”€â”€â”€â”€â”€â”€            â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ ───────           ──────                ───────            ─────────
  Windows Graphics  Media Foundation      SharePublisher     LiveKit SFU
- Capture (WGC)  â†’  H.264 CBR (2 tracks) â†’ (E2EE, GCM)   â†’  (self-hosted)
- WASAPI audio      NV12 â†’ H.264            audio pacing
+ Capture (WGC)  →  H.264 CBR (2 tracks) → (E2EE, GCM)   →  (self-hosted)
+ WASAPI audio      NV12 → H.264            audio pacing
 
  transport           receive              present
- â”€â”€â”€â”€â”€â”€â”€â”€â”€           â”€â”€â”€â”€â”€â”€â”€              â”€â”€â”€â”€â”€â”€â”€
- LiveKit SFU      â†’  RemoteShare       â†’  RemoteVideo  â†’ VideoItem (Qt Quick)
-                     RemoteAudioPlayout â†’  WASAPI sink â†’ speakers
+ ─────────           ───────              ───────
+ LiveKit SFU      →  RemoteShare       →  RemoteVideo  → VideoItem (Qt Quick)
+                     RemoteAudioPlayout →  WASAPI sink → speakers
 ```
 
 Key design points:
@@ -79,10 +79,10 @@ Working and tested end to end: sharing, watching, audio, E2EE, multi-share, 720p
 Known limitations, in priority order:
 
 1. **Packet loss cannot be buffered away** (docs/70): at 10% loss every profile fails with the same coverage, so the next lever is FEC/retransmission.
-2. **Video flicker under packet loss** on Wi-Fi: frames arrive in 150â€“200 ms clumps; the client freezes the last picture instead of blanking, but recovery depends on keyframes rather than per-packet repair.
-3. **CPU presentation** (`QQuickPaintedItem`) caps 1080p60 at roughly 50â€“56 fps presented.
+2. **Video flicker under packet loss** on Wi-Fi: frames arrive in 150–200 ms clumps; the client freezes the last picture instead of blanking, but recovery depends on keyframes rather than per-packet repair.
+3. **CPU presentation** (`QQuickPaintedItem`) caps 1080p60 at roughly 50–56 fps presented.
 4. **Not code-signed**, so SmartScreen warns on first run.
-5. **Token issuance is manual** â€” room tokens are minted out of band; a production deployment needs an auth service and per-room key distribution.
+5. **Token issuance is manual** — room tokens are minted out of band; a production deployment needs an auth service and per-room key distribution.
 
 ## A few words from me
 
@@ -96,8 +96,8 @@ If you look at this project for a job: the interesting part is not that it share
 
 ## Documentation
 
-The `docs/` folder contains the engineering log: capture and encoding decisions, the A/V scheduling model, the crash postmortems, remote SFU deployment, and the measurement methodology. `docs/69-crash-synthetic-tickets.md` is a good example of the debugging standard used throughout â€” every claim backed by a measurement.
+The `docs/` folder contains the engineering log: capture and encoding decisions, the A/V scheduling model, the crash postmortems, remote SFU deployment, and the measurement methodology. `docs/69-crash-synthetic-tickets.md` is a good example of the debugging standard used throughout — every claim backed by a measurement.
 
 ## License
 
-MIT â€” see [LICENSE](LICENSE). Third-party components and their licenses are listed in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
+MIT — see [LICENSE](LICENSE). Third-party components and their licenses are listed in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).

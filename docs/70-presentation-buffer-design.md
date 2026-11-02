@@ -20,11 +20,11 @@ Caps found and removed while investigating (each verified by the harness):
 
 | Cap | Where | Now |
 | --- | --- | --- |
-| A/V horizon Â±80 ms | `remote_audio_playout.cpp` | follows `leadUs_` |
+| A/V horizon ±80 ms | `remote_audio_playout.cpp` | follows `leadUs_` |
 | Anchor horizon 100 ms | `audio_playout.cpp` | follows `leadUs_` |
 | Residency 60 ms | `audio_playout.h` | constant (blocks a >60 ms lead) |
 | Staleness 150 ms | `remote_video.h` | constant (blocks a >150 ms lead) |
-| Lead validation 200 ms | `audio_playout.cpp` (`configureTiming`) | throws `Invalid playout timing` â€” the hard reason every >200 ms attempt died instantly |
+| Lead validation 200 ms | `audio_playout.cpp` (`configureTiming`) | throws `Invalid playout timing` — the hard reason every >200 ms attempt died instantly |
 | No timeline before the first picture | `remote_audio_playout.cpp` (`pump`) | audio cannot start; video presentation waits on the audio anchor, so the two deadlock |
 | **Frame queue depth 6** | `remote_video.h` (`pending_`) | **fixed: 24 makes video present at a 250 ms lead (173 frames vs 0)** |
 | **Audio admission at large lead** | `AudioPlayout::admit`/`alignAudio_` | still open: with video presenting correctly, **every audio block is denied** (`queue_high_water_blocks = 0`, `first_audio_ms = 0`) |
@@ -54,33 +54,33 @@ Consequences:
 
 ## Changes
 
-**`stream_profile.h`** â€” replace `leadUs`/`videoWaitLimitUs` with a single
+**`stream_profile.h`** — replace `leadUs`/`videoWaitLimitUs` with a single
 `bufferUs` per profile (45 / 150 / 300) and derive both from it
 (`lead = buffer`, `wait = buffer + headroom`).
 
-**`AudioPlayout`** â€” residency becomes `bufferUs + margin` (member, not constant);
+**`AudioPlayout`** — residency becomes `bufferUs + margin` (member, not constant);
 queue capacity sized for the largest profile; expiry uses the same number.
 
-**`RemoteVideo`** â€” staleness budget becomes `bufferUs + margin` (the fix that was
+**`RemoteVideo`** — staleness budget becomes `bufferUs + margin` (the fix that was
 written and reverted); `Pending` depth must cover `bufferUs` at 60 fps.
 
-**`RemoteAudioPlayout::pump`** â€” the anchor and `SourceWindow` use the delayed
+**`RemoteAudioPlayout::pump`** — the anchor and `SourceWindow` use the delayed
 timeline: `presentedTimeline = localFor(now) - bufferUs` instead of the last
 painted sender time. This is the core change; everything else follows from it.
 
-**Harness** â€” every gate expressed in milliseconds of allowed buffering
+**Harness** — every gate expressed in milliseconds of allowed buffering
 (`queue_high_water_blocks * 10 <= bufferUs + 20`), and the lead/wait gates take
 `bufferUs + headroom`.
 
 ## Tests before it may be called done
 
-1. Matrix: {Low, Balanced, Smooth} Ã— {720p, 1080p} Ã— {30, 60 fps} â€” all green.
+1. Matrix: {Low, Balanced, Smooth} Ã— {720p, 1080p} Ã— {30, 60 fps} — all green.
 2. A/V sync: `bounded_av_lag` under 80 ms in every cell (the buffer must not
    desynchronise the picture from the sound).
 3. Latency: measure glass-to-glass for each profile; it must grow by roughly
    `bufferUs` and not more.
 4. Loss case: replay a run with induced packet loss (`GOODSHARING_TEST_DROP` hook
-   to be added) â€” Smooth must show no audio gap where Low is allowed to.
+   to be added) — Smooth must show no audio gap where Low is allowed to.
 
 ## Risks
 
@@ -103,7 +103,7 @@ painted sender time. This is the core change; everything else follows from it.
 
 Step 2 is done. `RemoteAudioPlayout::pump` no longer measures audio against the
 last painted picture. When a buffer is configured, the reference is the delayed
-timeline â€” `senderAt(now)`, the sender position that should be audible now, which
+timeline — `senderAt(now)`, the sender position that should be audible now, which
 the common clock already places one lead after capture. Three consequences:
 
 - The A/V horizon, the trimmed commit margin, the render `SourceWindow` and the
@@ -119,12 +119,12 @@ Measured on the 720p case, same binary, delayed arm extended to seven runs:
 
 | Path | Result | drawn | audio blocks | resets |
 | --- | --- | --- | --- | --- |
-| delayed timeline | 7/7 pass | 507â€“525 of 512â€“528 | 888â€“1189 | 2â€“3 |
-| old timeline | 1/3 fail (tone gaps / coverage) | 511â€“515 of 515â€“519 | 1169â€“1186 | 2â€“3 |
+| delayed timeline | 7/7 pass | 507–525 of 512–528 | 888–1189 | 2–3 |
+| old timeline | 1/3 fail (tone gaps / coverage) | 511–515 of 515–519 | 1169–1186 | 2–3 |
 
 No delayed run reset more than three times, against 715 in the storm run. Two of the
 seven admitted fewer audio blocks (888, 889) while still passing every gate, so the
-delayed path is not uniform yet â€” worth watching in the step 4 matrix rather than
+delayed path is not uniform yet — worth watching in the step 4 matrix rather than
 declaring the model finished.
 
 The old path's failure this time was a tone gap rather than a reset storm, so its
@@ -188,22 +188,22 @@ fail. Those six are not caused by step 1 (the affected binaries do not include
 `stream_profile.h` and were not relinked by it); they predate it, and at least one
 is a test left behind by an intentional behaviour change:
 
-- `encoded_delivery_budget` â€” `test_encoded_delivery.cpp` still expects the ~3 s
+- `encoded_delivery_budget` — `test_encoded_delivery.cpp` still expects the ~3 s
   periodic-keyframe interval. `PeriodicKeyframe::request` now requires
   `max(5 s, 30 s at 1 MB/10 Mbps)` (`periodic_keyframe.h`, docs/64), so the
   9 s/30 kbps request the test makes is correctly refused. The test needs updating
   to the current interval, not the other way round.
-- `bounded_audio_playout`, `remote_audio_commit_admission` â€” both assert the older
+- `bounded_audio_playout`, `remote_audio_commit_admission` — both assert the older
   fixed 80 ms bounded-advance gate (`now+80000`, "slightly early"/"modestly early"
   pictures) that the configurable lead/wait model replaced. Deciding their new
   expectations means deciding what the gates should be under `bufferUs`, so they
   belong with step 3.
-- `remote_video_presentation` â€” expects a submitted frame to be refused after
+- `remote_video_presentation` — expects a submitted frame to be refused after
   165 ms; docs/68 deliberately made untimed pictures presentable at arrival, which
   changes that boundary.
-- `encryption_gate_and_input` â€” expects the bounded backlog to report
+- `encryption_gate_and_input` — expects the bounded backlog to report
   `pending_audio_ms == 100` with one overflow drop.
-- `remote_share_ownership` â€” expects a history bound that `RemoteShare` no longer
+- `remote_share_ownership` — expects a history bound that `RemoteShare` no longer
   produces.
 
 The last two are diagnosed only as far as their failing assertion; neither has been
@@ -214,11 +214,11 @@ called done", not the unit suite.
 ## Observed failure (2026-11-02)
 
 The 720p case at the current 55 ms lead is intermittent, and the failures are not
-near misses â€” they are reset storms:
+near misses — they are reset storms:
 
 | Run | Result | drawn / admitted | audio blocks admitted | first audio | resets |
 | --- | --- | --- | --- | --- | --- |
-| `20261102-032345` | fail | 162 / 519 | 0 | â€” | 715 |
+| `20261102-032345` | fail | 162 / 519 | 0 | — | 715 |
 | `20261102-032443` | pass | 527 / 531 | 1190 | 15.2 ms | 3 |
 
 Six consecutive 720p runs that night gave pass, fail, fail, fail, fail, pass; three
@@ -230,7 +230,7 @@ valid position relative to the last painted picture.
 
 Acceptance numbers for the model change, taken from the passing run: roughly 3
 resets, ~527 drawn of ~531 admitted, over 1000 admitted audio blocks and a first
-audible block near 15 ms â€” repeated across runs, not a single green one.
+audible block near 15 ms — repeated across runs, not a single green one.
 
 ### Second attempt: gates follow the profile, buffers still not stable
 

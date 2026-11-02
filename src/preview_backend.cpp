@@ -65,7 +65,7 @@ PreviewBackend::PreviewBackend() {
     });
     connect(&room_,&goodsharing::RoomController::stateChanged,this,[this](auto state,QString message){
         using State=goodsharing::RoomController::State;
-        roomStatus_=!message.isEmpty()?message:state==State::Ready?"Connected Â· ready to start a share":state==State::Joining?"Connectingâ€¦":state==State::Leaving?"Leavingâ€¦":"Not connected.";
+        roomStatus_=!message.isEmpty()?message:state==State::Ready?"Connected · ready to start a share":state==State::Joining?"Connecting…":state==State::Leaving?"Leaving…":"Not connected.";
         if(state==State::Failed&&message.contains("duplicate",Qt::CaseInsensitive))
             roomStatus_="This identity is still connected to the room; wait about 15 seconds and join again.";
         if(state==State::Failed||state==State::Idle||state==State::Reconnecting){stopSharing();stopWatching();remoteModel_.clear();}
@@ -93,8 +93,8 @@ PreviewBackend::PreviewBackend() {
         const auto& manifest=watch_->manifest();
         if(manifest.owner!=owner||manifest.id!=shareId)return;
         remoteSourceMinimized_=minimized;
-        remoteStatus_=minimized?"User minimized app Â· waiting for it to be restored"
-            :testAvPlayback_?"Watching encrypted audio/video Â· development test":"Watching encrypted video Â· sound playback pending synchronization";
+        remoteStatus_=minimized?"User minimized app · waiting for it to be restored"
+            :testAvPlayback_?"Watching encrypted audio/video · development test":"Watching encrypted video · sound playback pending synchronization";
         Q_EMIT stateChanged();
     });    connect(&room_,&goodsharing::RoomController::shareDiagnostics,this,[this](QJsonObject report){publicationReport_=std::move(report);});
     if(qEnvironmentVariableIsSet("GOODSHARING_TEST_AV_TRACE"))connect(&room_,&goodsharing::RoomController::watchStopped,this,[this](QJsonObject report){
@@ -116,17 +116,17 @@ PreviewBackend::PreviewBackend() {
                             shareSourceMinimized_=minimized;
                             if(captureSharing_){
                                 room_.publishShareSourceState(minimized);
-                                status_=minimized?"Sharing Â· source window minimized; viewers are waiting":"Sharing Â· encrypted 1080p + 720p";
+                                status_=minimized?"Sharing · source window minimized; viewers are waiting":"Sharing · encrypted 1080p + 720p";
                             }
                             Q_EMIT stateChanged();
                         },Qt::QueuedConnection);
                     });
                 audioFirstBlockUs_={};shareStartUs_=std::chrono::steady_clock::now();
-            captureSharing_=true;active_=true;status_="Sharing Â· encrypted 1080p + 720p";
+            captureSharing_=true;active_=true;status_="Sharing · encrypted 1080p + 720p";
             logWatch(QString("share started audio=%1 previewFrames=%2").arg(selectedAudioMode_).arg(capturedFrames()));
             }catch(const std::exception&){stopSharing();status_="Capture could not start; share stopped.";}
             pendingShare_.reset();
-        }else if(state==static_cast<int>(State::Starting))status_="Preparing encrypted video and audioâ€¦";
+        }else if(state==static_cast<int>(State::Starting))status_="Preparing encrypted video and audio…";
         else if(state==static_cast<int>(State::Stopped)||state==static_cast<int>(State::Failed)){
             logWatch(QString("share stopped previewFrames=%1 state=%2").arg(capturedFrames()).arg(state));
             sender_.stop();captureSharing_=false;shareInput_.reset();pendingShare_.reset();active_=false;
@@ -171,7 +171,7 @@ PreviewBackend::PreviewBackend() {
                 remoteReady_=true;remoteStalled_=stalled;
                 // A minimized source explains the frozen picture; do not replace
                 // that notice with the generic stall text.
-                if(!remoteSourceMinimized_)remoteStatus_=stalled?"No new video frames Â· picture may be static or stalled":testAvPlayback_?"Watching encrypted audio/video Â· development test":"Watching encrypted video Â· sound playback pending synchronization";Q_EMIT stateChanged();
+                if(!remoteSourceMinimized_)remoteStatus_=stalled?"No new video frames · picture may be static or stalled":testAvPlayback_?"Watching encrypted audio/video · development test":"Watching encrypted video · sound playback pending synchronization";Q_EMIT stateChanged();
             }
         }
         if(captureSharing_&&(++shareLogTick_%125)==0)room_.refreshShareDiagnostics();
@@ -208,7 +208,7 @@ void PreviewBackend::refreshSources() {
     selectedSourceIndex_=0;
     EnumDisplayMonitors(nullptr,nullptr,[](HMONITOR monitor,HDC,LPRECT rect,LPARAM data)->BOOL {
         auto* self=reinterpret_cast<PreviewBackend*>(data);
-        const auto label=QString("Display %1 Â· %2 Ã— %3").arg(self->nativeSources_.size()+1).arg(rect->right-rect->left).arg(rect->bottom-rect->top);
+        const auto label=QString("Display %1 · %2 Ã— %3").arg(self->nativeSources_.size()+1).arg(rect->right-rect->left).arg(rect->bottom-rect->top);
         self->nativeSources_.push_back({reinterpret_cast<quintptr>(monitor),0,true,label}); return TRUE;
     },reinterpret_cast<LPARAM>(this));
     EnumWindows([](HWND hwnd,LPARAM data)->BOOL {
@@ -238,7 +238,7 @@ void PreviewBackend::startPreview(int index,int audioMode,int audioApplication) 
         if(audioApplication<0||audioApplication>=static_cast<int>(nativeApps_.size())) { status_="Choose an application for audio."; Q_EMIT stateChanged(); return; }
         audioPid=nativeApps_[audioApplication].pid;
     }
-    active_=true; status_="Previewing Â· "+source.label;
+    active_=true; status_="Previewing · "+source.label;
     const auto generation=++generation_;
     const auto error=[this,generation](QString message) { QMetaObject::invokeMethod(this,[this,generation,message] { fail(generation,message); },Qt::QueuedConnection); };
     capture_.start(source.handle,source.monitor,[this](goodsharing::ScreenFrame frame) { std::lock_guard lock(mutex_); latest_=std::move(frame.image); frames_++; },error);
@@ -400,7 +400,7 @@ QVariantList PreviewBackend::remoteShares()const {
     for(int row=0;row<remoteModel_.rowCount();row++){
         const auto index=remoteModel_.index(row);const auto high=remoteModel_.data(index,M::Has1080Role).toBool(),low=remoteModel_.data(index,M::Has720Role).toBool();if(!high&&!low)continue;
         const auto owner=remoteModel_.data(index,M::OwnerRole).toString(),id=remoteModel_.data(index,M::ShareIdRole).toString();
-        result.append(QVariantMap{{"label",owner+" Â· "+id.left(6)},{"owner",owner},{"id",id},{"generation",remoteModel_.data(index,M::GenerationRole)},{"has1080",high},{"has720",low},{"hasAudio",remoteModel_.data(index,M::HasAudioRole)}});
+        result.append(QVariantMap{{"label",owner+" · "+id.left(6)},{"owner",owner},{"id",id},{"generation",remoteModel_.data(index,M::GenerationRole)},{"has1080",high},{"has720",low},{"hasAudio",remoteModel_.data(index,M::HasAudioRole)}});
     }return result;
 }
 namespace {std::int64_t watchLocalUs(){return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();}}
@@ -421,9 +421,9 @@ void PreviewBackend::watchShare(int index,int quality) {
         if(candidateWatch_&&(candidateWatch_->manifest().quality==goodsharing::ShareTrack::Video1080?1080:720)==quality)return;
         if(candidateWatch_)cancelCandidate("Quality change cancelled.");
         if(watchedQuality()==quality){pendingQuality_.reset();Q_EMIT watchSelectionChanged();Q_EMIT stateChanged();return;}
-        pendingQuality_=next;remoteStatus_="Preparing the new video qualityâ€¦";pollHandover();Q_EMIT stateChanged();return;
+        pendingQuality_=next;remoteStatus_="Preparing the new video quality…";pollHandover();Q_EMIT stateChanged();return;
     }
-    stopWatching();if(retiringWatch_||!retiringTracks_.empty()){pendingWatch_=next;remoteStatus_="Changing remote shareâ€¦";}else beginWatch(next);Q_EMIT stateChanged();
+    stopWatching();if(retiringWatch_||!retiringTracks_.empty()){pendingWatch_=next;remoteStatus_="Changing remote share…";}else beginWatch(next);Q_EMIT stateChanged();
 }
 void PreviewBackend::beginWatch(Selection selection) {
     logWatch(QString("beginWatch owner=%1 id=%2 gen=%3 quality=%4 catalogGen=%5 cat1080=%6 cat720=%7")
@@ -508,7 +508,7 @@ void PreviewBackend::beginWatch(Selection selection) {
                 if(audioRetryKey_!=key){audioRetryKey_=key;audioRetryAttempts_=0;}
                 if(watch_&&remoteAv_&&watching()&&audioRetryAttempts_<audioRetryLimit_){
                     audioRetryAttempts_++;stopWatching();pendingWatch_=selection;
-                    remoteStatus_="Retrying stereo audio subscriptionâ€¦";Q_EMIT stateChanged();
+                    remoteStatus_="Retrying stereo audio subscription…";Q_EMIT stateChanged();
                 }
             },Qt::QueuedConnection);
         });
@@ -521,7 +521,7 @@ void PreviewBackend::beginWatch(Selection selection) {
     logWatch(QString("watch OK owner=%1 id=%2 quality=%3")
         .arg(selection.owner,selection.id).arg(selection.quality));
     Q_EMIT watchSelectionChanged();
-    if(remoteItem_)remoteItem_->setRemote(remoteVideo_);remoteStatus_="Waiting for encrypted videoâ€¦";
+    if(remoteItem_)remoteItem_->setRemote(remoteVideo_);remoteStatus_="Waiting for encrypted video…";
 }
 void PreviewBackend::recordHandover(QJsonObject record){handoverHistory_.append(record);while(handoverHistory_.size()>8)handoverHistory_.removeAt(0);}
 void PreviewBackend::stageQuality(Selection selection){
@@ -542,7 +542,7 @@ void PreviewBackend::stageQuality(Selection selection){
     handoverRequest_={{"requested_receiver_us",static_cast<double>(watchLocalUs())},{"from",watchedQuality()},{"to",selection.quality},{"before_playback",remoteAv_->report()}};
     candidateWatch_=candidate;candidateFrames_=frames;candidateDisplayed_=false;pendingQuality_.reset();
     candidateDeadline_=std::chrono::steady_clock::now()+std::chrono::seconds(10);
-    remoteStatus_="Preparing the new video qualityâ€¦";Q_EMIT stateChanged();
+    remoteStatus_="Preparing the new video quality…";Q_EMIT stateChanged();
 }
 void PreviewBackend::commitCandidate(){
     if(!candidateWatch_||!remoteAv_||remoteAv_->selectedVideo()!=candidateWatch_)return;
@@ -560,7 +560,7 @@ void PreviewBackend::commitCandidate(){
         if(candidateFrames_)candidateFrames_->setLogger([](const QString& line){logWatch(line);});
         watch_=std::move(candidateWatch_);remoteVideo_=std::move(candidateFrames_);
     candidateDisplayed_=false;handoverRequest_={};remoteReady_=true;remoteStalled_=false;
-    if(remoteItem_)remoteItem_->setRemote(remoteVideo_);remoteStatus_="Watching encrypted audio/video Â· development test";
+    if(remoteItem_)remoteItem_->setRemote(remoteVideo_);remoteStatus_="Watching encrypted audio/video · development test";
     Q_EMIT watchSelectionChanged();Q_EMIT stateChanged();
 }
 bool PreviewBackend::cancelCandidate(QString reason){
