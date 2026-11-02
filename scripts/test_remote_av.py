@@ -16,6 +16,7 @@ from pathlib import Path
 import subprocess
 import time
 from local_media_fixture import LocalMediaFixture, ROOT
+
 from process_footprint import ProcessFootprint
 from test_capture_sharing import stop
 
@@ -93,6 +94,7 @@ def checkpoint_count(path):
     # QSaveFile replaces this owned snapshot atomically. On Windows a brief
     # sharing conflict while it is replaced is not a completed observation.
     # The caller's original deadline still bounds all retries.
+
     try:
         return len(json.loads(path.read_text(encoding='utf-8')))
     except (PermissionError, FileNotFoundError):
@@ -220,7 +222,7 @@ def check_quality_switch(view, case):
     return checks
 
 
-def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None, duration_ms=None, clock_profile='upstream', server_debug=False, disable_presentation_floor=False, disable_audio_retry=False, server=None):
+def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None, duration_ms=None, clock_profile='upstream', server_debug=False, disable_presentation_floor=False, disable_audio_retry=False, server=None, loss_percent=0.0):
     folder.mkdir(parents=True)
     fixture = None if server else LocalMediaFixture(folder / 'server')
     children, logs, profiles = [], [], []
@@ -236,6 +238,7 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
     result['clock_profile'] = clock_profile
     result['server_debug'] = server_debug
     result['presentation_floor_disabled'] = disable_presentation_floor
+    relay = None
     result['audio_retry_disabled'] = disable_audio_retry
     try:
         if clock_profile not in ('upstream', 'same-server-default', 'server-only-500ms', '500ms'):
@@ -250,6 +253,11 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
                           clock_server=clock_profile != 'upstream', server_debug=server_debug)
             result['server_runtime'] = fixture.server_info
             env = fixture.client_env(room)
+        if loss_percent:
+            # Receive-side impairment: this share of arriving frames never reaches the
+            # playout, which is what packet loss looks like to the scheduler.
+            env['GOODSHARING_TEST_DROP'] = str(loss_percent)
+            result['impairment'] = {'drop_percent': loss_percent}
         env['QML_IMPORT_PATH'] = str(ROOT / '.deps/qt/6.8.3/msvc2022_64/qml')
         env.pop('GOODSHARING_TEST_AV_TRACE', None)
         env.pop('GOODSHARING_TEST_RTCP_REPORT_MS', None)
@@ -331,6 +339,7 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
             command += ['--test-view-visible']
         else:
             command += ['--test-window-minimized']
+        result['impairment_env_present'] = 'GOODSHARING_TEST_DROP' in viewer_env
         viewer = launch('viewer', command, viewer_env)
         sender_command = [str(app), '--smoke-share-hwnd', source_info['hwnd'], '--smoke-pid', str(source.pid),
                           '--smoke-duration-ms', str(watch_ms + 2000), '--report', str(folder / 'sender.json'),
@@ -524,6 +533,9 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
         for child in reversed(children): stop(child)
         for log in logs: log.close()
         result['owned_clients_stopped'] = all(child.poll() is not None for child in children)
+        if relay is not None:
+            result['relay'] = relay.snapshot()
+            relay.close()
         result['owned_server_stopped'] = fixture.stop() if fixture else True
         result['passed'] &= result['owned_clients_stopped'] and result['owned_server_stopped']
         (folder / 'summary.json').write_text(json.dumps(result, indent=2))
@@ -562,6 +574,7 @@ def main():
     parser.add_argument('--server-secret', help='API secret for --server-url (default: artifacts/sfu-credentials.ini)')
     parser.add_argument('--server-debug', action='store_true', help='Record owned SFU transport diagnostics for connection failures')
     parser.add_argument('--disable-presentation-floor', action='store_true', help='Test-only A/B control; allow catch-up frames less than 10 ms apart')
+    parser.add_argument('--loss', type=float, default=0.0, help='Drop this percent of arriving frames before the playout')
     parser.add_argument('--disable-audio-retry', action='store_true', help='Test-only control; disable bounded stereo resubscription')
     parser.add_argument('--app-exe', type=Path, help='Explicit archived project app for a same-PC regression control; default is the current build')
     parser.add_argument('--watch-duration-ms', type=int, help='Longer owned local observation, 18000-58000 ms; default depends on case')
@@ -575,7 +588,7 @@ def main():
     rows = []
     selected = cases if args.case == 'all' else [c for c in cases if c.startswith('static')] if args.case == 'static-all' else [c for c in cases if c.startswith('switch')] if args.case == 'switch-all' else [args.case]
     for case in selected:
-        row = run_case(folder / case, case, args.trace_timing, args.visible_view, args.app_exe, args.watch_duration_ms, args.clock_profile, args.server_debug, args.disable_presentation_floor, args.disable_audio_retry, remote_server(args)); rows.append(row)
+        row = run_case(folder / case, case, args.trace_timing, args.visible_view, args.app_exe, args.watch_duration_ms, args.clock_profile, args.server_debug, args.disable_presentation_floor, args.disable_audio_retry, remote_server(args), loss_percent=args.loss); rows.append(row)
         print(json.dumps(dict(case=case, passed=row['passed'], error=row.get('error'),
                              failed_checks=[k for k, v in row.get('checks', {}).items() if not v])), flush=True)
     summary = dict(passed=all(row['passed'] for row in rows), runs=rows)

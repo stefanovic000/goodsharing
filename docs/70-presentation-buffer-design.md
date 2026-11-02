@@ -308,3 +308,33 @@ same 720p case at 55 ms before this work failed 4 of 6 runs with 715 resets and 
 audio. The profile trade is now the only real cost: first audio is 21-32 ms on
 Low, 72-80 ms on Balanced and 230-239 ms on Smooth, which is the buffer being paid
 for jitter tolerance as designed.
+## Loss case: the buffer does not absorb erasure (2026-11-02)
+
+The step 4 loss case now exists: `--loss PERCENT` makes the receiver drop that
+share of arriving frames before the scheduler sees them (`GOODSHARING_TEST_DROP`,
+read with `getenv` because this app's Qt accessor reports 0 for the variable).
+
+720p, 30 fps, same build, all three profiles:
+
+| Loss | Low 45 ms | Balanced 150 ms | Smooth 300 ms |
+| --- | --- | --- | --- |
+| 0% | pass, cov 0.97 | pass, cov 0.99 | pass, cov 0.99 |
+| 5% | pass, cov 1.00 | pass, cov 1.00 | pass, cov 1.00 |
+| 10% | fail, cov 0.886 | fail, cov 0.892 | fail, cov 0.886 |
+| 20% | fail, cov 0.740 | fail, cov 0.799 | fail, cov 0.809 |
+
+The profiles do not separate: at 10% and 20% every profile loses the same share of
+media and fails the same gates, and the failures are `media_filled_device_frames`,
+`live_window_coverage` and `continuous_tone_without_gap` — missing samples, not
+late ones. That is the expected result and it refutes part of this document's own
+premise: a presentation buffer converts *jitter* into tolerance, but it cannot
+invent an erased 10 ms block. Erasure needs recovery (FEC, retransmission), which is
+the same conclusion docs/67 reached from the internet path.
+
+A jitter test would be the one that separates the profiles, and the naive version
+(sleeping in the ingress callback) kills the viewer because it blocks the SDK
+callback thread, so it needs a queued, timer-driven delay rather than a sleep. That
+is the open piece of the loss case.
+
+Next levers, in order: FEC/retransmission for erasure, then a non-blocking jitter
+impairment to demonstrate the buffer's actual benefit.

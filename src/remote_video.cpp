@@ -1,7 +1,18 @@
-#include "remote_video.h"
+﻿#include "remote_video.h"
 #include <algorithm>
+#include <random>
+#include <thread>
+#include <cstdlib>
 #include <QJsonArray>
 namespace goodsharing {
+namespace {
+// Test-owned: proves at load time that the impairment variable reached this
+// process, so a silent zero is distinguishable from an unused hook.
+struct DropProbe {
+    DropProbe(){const int percent=qEnvironmentVariableIntValue("GOODSHARING_TEST_DROP");if(percent>0)qWarning("impairment: dropping %d%% of arriving pictures",percent);}
+};
+const DropProbe dropProbe;
+}
 namespace {
 unsigned sourceFrameId(const livekit::VideoFrameEvent& event,int width,int height) {
     const auto* bytes=event.frame.data();
@@ -77,6 +88,11 @@ void RemoteVideo::bind(const std::shared_ptr<RemoteShare>& watch) {
     std::lock_guard lock(mutex_);if(bound_||!watch)throw std::logic_error("Remote video is one selection only");watch_=watch;bound_=true;
 }
 void RemoteVideo::submit(livekit::VideoFrameEvent& event) {
+    // Test-only receive impairment (GOODSHARING_TEST_DROP=percent): this share of
+    // arriving pictures never reaches the handoff, like network loss.
+    static const int dropPercent=[](){const char* v=std::getenv("GOODSHARING_TEST_DROP");return v?std::atoi(v):0;}();
+    if(dropPercent>0){static thread_local std::mt19937 rng{std::random_device{}()};
+        if(std::uniform_int_distribution<int>(1,100)(rng)<=dropPercent){++impairmentDrops_;return;}}
     const auto arrival=Clock::now();
     ++submittedFrames_;
     const auto ingressBegan=Clock::now();
@@ -274,7 +290,7 @@ void RemoteVideo::frameQueued(){
 }
 QJsonObject RemoteVideo::report()const {
     std::lock_guard lock(mutex_);auto late=lateness_;std::sort(late.begin(),late.begin()+latenessCount_);
-    QJsonObject result{{"ingress_lock_wait_avg_ms",lockWaitCount_?double(lockWaitTotalUs_)/lockWaitCount_/1000.0:0.0},{"ingress_lock_wait_max_ms",lockWaitMaxUs_/1000.0},{"submitted_frames",static_cast<double>(submittedFrames_)},{"pending_drops",static_cast<double>(pendingDrops_)},{"admitted_frames",static_cast<double>(admitted_)},{"invalid_frames",static_cast<double>(invalid_)},{"denied_frames_or_draws",static_cast<double>(denied_)},{"drawn_distinct_frames",static_cast<double>(drawn_)},{"expired_or_revoked_images",static_cast<double>(expired_)},{"pending_images",static_cast<int>(pendingCount_)+(image_.isNull()?0:1)},{"last_draw_visible",visible_},{"maximum_first_paint_residence_ms",static_cast<double>(lifetime.count())},{"held_image_without_update",!image_.isNull()&&Clock::now()-received_>lifetime},{"audio_playback_enabled",bool(timing_.schedule)},
+    QJsonObject result{{"ingress_lock_wait_avg_ms",lockWaitCount_?double(lockWaitTotalUs_)/lockWaitCount_/1000.0:0.0},{"ingress_lock_wait_max_ms",lockWaitMaxUs_/1000.0},{"submitted_frames",static_cast<double>(submittedFrames_)},{"impairment_drops",static_cast<double>(impairmentDrops_)},{"pending_drops",static_cast<double>(pendingDrops_)},{"admitted_frames",static_cast<double>(admitted_)},{"invalid_frames",static_cast<double>(invalid_)},{"denied_frames_or_draws",static_cast<double>(denied_)},{"drawn_distinct_frames",static_cast<double>(drawn_)},{"expired_or_revoked_images",static_cast<double>(expired_)},{"pending_images",static_cast<int>(pendingCount_)+(image_.isNull()?0:1)},{"last_draw_visible",visible_},{"maximum_first_paint_residence_ms",static_cast<double>(lifetime.count())},{"held_image_without_update",!image_.isNull()&&Clock::now()-received_>lifetime},{"audio_playback_enabled",bool(timing_.schedule)},
         {"timed_presentation",bool(timing_.schedule)},{"scheduled_queue_high_water",static_cast<int>(pendingHigh_)},{"scheduled_queue_capacity",static_cast<int>(pending_.size())},
         {"warming",warming_},{"warm_queue_high_water",static_cast<int>(warmHigh_)},{"scheduled_drops",static_cast<double>(pendingDrops_)},{"next_due_preserved_on_overflow",static_cast<double>(nextDuePreserved_)},{"unclocked_frames",static_cast<double>(unclocked_)},{"timed_draws",static_cast<double>(timedDraws_)},
         {"wait_for_frame_queue",timing_.waitForSwap},{"queued_presentations",static_cast<double>(queuedPresentations_)},{"maximum_queue_lateness_ms",maxQueueLateness_/1000.0},

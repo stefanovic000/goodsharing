@@ -71,7 +71,7 @@ private:
     std::array<std::int64_t,512> lateness_{};std::size_t latenessCount_=0,latenessCursor_=0;
     std::int64_t maxLateness_=0;
     bool fastPaint_=qEnvironmentVariableIntValue("GOODSHARING_TEST_FAST_PAINT")!=0;
-    std::uint64_t submittedFrames_=0,untimedSerial_=0,lockWaitCount_=0;
+    std::uint64_t submittedFrames_=0,untimedSerial_=0,lockWaitCount_=0,impairmentDrops_=0;
     std::function<void(const QString&)> logger_;
     bool frozenNotified_=false;
     std::int64_t freezeCount_=0;std::int64_t lockWaitTotalUs_=0,lockWaitMaxUs_=0;

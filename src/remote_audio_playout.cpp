@@ -1,14 +1,25 @@
 ﻿#include "remote_audio_playout.h"
 #include "frame_metadata_codec.h"
 #include <chrono>
+#include <thread>
 #include <cmath>
 #include <stdexcept>
 #include <algorithm>
 #include <QJsonArray>
+#include <random>
+#include <cstdlib>
 
 namespace goodsharing {
 namespace {
-std::int64_t localNow(){return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();}
+// Test-only receive impairment (GOODSHARING_TEST_DROP=percent): this share of
+// arriving frames never reaches the playout, which is what network loss looks
+// like to the scheduler. Off unless the variable is set.
+bool dropArrival(){
+    static const int percent=[](){const char* v=std::getenv("GOODSHARING_TEST_DROP");return v?std::atoi(v):0;}();
+    if(percent<=0)return false;
+    static thread_local std::mt19937 rng{std::random_device{}()};
+    return std::uniform_int_distribution<int>(1,100)(rng)<=percent;
+}std::int64_t localNow(){return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 template<class T> PlayoutClock stamp(const T& event){return {event.sender_ntp_us.value_or(0),event.rtp_timestamp.value_or(0),event.sender_clock_epoch.value_or(0),event.rtcp_reports.value_or(0),event.rtp_timestamp.has_value()};}
 }
 RemoteAudioPlayout::RemoteAudioPlayout(AudioPlayoutSink& sink,LocalClock clock,std::shared_ptr<RemoteMediaSelection> selection):sink_(sink),clock_(clock?std::move(clock):LocalClock{localNow}),selection_(selection?std::move(selection):std::make_shared<RemoteMediaSelection>()){}
@@ -170,6 +181,7 @@ bool RemoteAudioPlayout::video(livekit::VideoFrameEvent& frame){
     return scheduleVideo(frame).has_value();
 }
 std::optional<PresentationTicket> RemoteAudioPlayout::scheduleVideo(livekit::VideoFrameEvent& frame){
+    if(dropArrival())return {};
     const auto identity=frame.metadata&&frame.metadata->user_data?decodeFrameIdentity(*frame.metadata->user_data):std::nullopt;
     if(identity&&identity->priming)return {};
     std::lock_guard lock(mutex_);if(split_)return {};const auto watch=watch_.lock();
@@ -250,6 +262,7 @@ bool RemoteAudioPlayout::presentedLocked(PresentationTicket ticket){
     presentedSerial_=ticket.serial;presentedSender_=ticket.senderUs;presentedLocal_=now;presentedFrames_++;return true;
 }
 bool RemoteAudioPlayout::audio(livekit::AudioFrameEvent& frame){
+    if(dropArrival())return false;
     if(frame.frame.sampleRate()!=48000||frame.frame.numChannels()!=2||frame.frame.samplesPerChannel()!=480)return audio({},{});
     return audio(stamp(frame),frame.frame.data());
 }
@@ -428,7 +441,7 @@ QJsonObject RemoteAudioPlayout::report(bool includeTestHistory)const{
         {"queued_blocks",static_cast<int>(s.queued)},{"queue_high_water_blocks",static_cast<int>(s.highWater)},
         {"front_deadline_lead_ms",frontDeadline?(*frontDeadline-reportNow)/1000.0:0},
         {"tail_deadline_lead_ms",tailDeadline?(*tailDeadline-reportNow)/1000.0:0},
-        {"pcm_capacity_ms",core_.configuredResidenceUs()/1000.0},{"maximum_pcm_residence_ms",core_.configuredResidenceUs()/1000.0},{"target_video_lead_ms",core_.configuredLeadUs()/1000.0},
+        {"drop_percent_seen",std::getenv("GOODSHARING_TEST_DROP")?std::atoi(std::getenv("GOODSHARING_TEST_DROP")):0},{"pcm_capacity_ms",core_.configuredResidenceUs()/1000.0},{"maximum_pcm_residence_ms",core_.configuredResidenceUs()/1000.0},{"target_video_lead_ms",core_.configuredLeadUs()/1000.0},
         {"maximum_endpoint_lead_ms",30},{"video_clock_lifetime_ms",150},{"scheduler_bytes",static_cast<double>(sizeof(AudioPlayout))},
         {"admitted_audio_blocks",static_cast<double>(s.admitted)},{"unclocked",static_cast<double>(s.unclocked)},{"unclocked_video",static_cast<double>(s.unclockedVideo)},{"unclocked_audio",static_cast<double>(s.unclockedAudio)},
         {"invalid",static_cast<double>(s.invalid)},{"late_input_blocks",static_cast<double>(s.lateInput)},
