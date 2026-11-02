@@ -500,7 +500,7 @@ void PreviewBackend::beginWatch(Selection selection) {
     }
     retryWatchAttempts_=0;retryWatch_.reset();
     if(playback){
-        playback->configureTiming(timing().leadUs,timing().videoWaitLimitUs);
+        playback->configureTiming(timing().leadUs(),timing().videoWaitLimitUs());
         playback->configure(frames,watch);
         playback->setAudioRestart([this,selection]{
             QMetaObject::invokeMethod(this,[this,selection]{

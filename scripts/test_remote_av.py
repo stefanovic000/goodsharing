@@ -394,7 +394,7 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
             sender.kill()
         result['sender_exit'] = sender.returncode
         view, send = (json.loads((folder / name).read_text()) for name in ('viewer.json', 'sender.json'))
-        # Lead/wait follow the profile: low 25/60, balanced 60/120, smooth 150/250.
+        # Lead/wait follow the profile: low 45/80, balanced 55/90, smooth 55/110 ms.
         profile_name = 'smooth' if (case == 'smooth' or args.profile == 'auto') else (args.profile or 'balanced')
         profile_lead = {'low': 90, 'balanced': 100, 'smooth': 120}[profile_name]
         profile_fill = .90 if case == 'smooth' else .95
