@@ -294,3 +294,17 @@ Smooth 300 ms:
 Resets are 2-3 in every cell and the native suite is 23/23. The trade the profiles
 make is now visible in the numbers: first audio rises from 21 ms (Low) to 230-239 ms
 (Smooth), which is the presentation delay being paid for jitter tolerance.
+### Repeatability
+
+The matrix was run twice, in opposite order of cases, plus the scenario cases:
+
+- pass 1: 8/8 (720, 1080, low, smooth x 30, 60 fps)
+- pass 2: 8/8 (same cases, reordered)
+- scenarios at 60 fps: `static`, `static-1080`, `minimized`, `switch` and
+  `wrong-key` all pass
+
+Twenty-one consecutive green runs, every one at 2-3 resets. For comparison, the
+same 720p case at 55 ms before this work failed 4 of 6 runs with 715 resets and no
+audio. The profile trade is now the only real cost: first audio is 21-32 ms on
+Low, 72-80 ms on Balanced and 230-239 ms on Smooth, which is the buffer being paid
+for jitter tolerance as designed.
