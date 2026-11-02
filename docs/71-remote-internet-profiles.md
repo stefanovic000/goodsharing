@@ -1,4 +1,4 @@
-﻿# Profiles on the real internet path
+# Profiles on the real internet path
 
 Date: 2026-11-02, Europe/Budapest
 
@@ -31,9 +31,9 @@ The SFU speaks plain `ws://`; a `wss://` attempt fails inside the SDK with
 | --- | ---: | --- | --- | ---: | ---: | ---: |
 | Low | 45 ms | **fail** | 434/438 | 755 | 5 | 16.8 ms |
 | Balanced | 150 ms | pass | 452/459 | 820 | 2 | 156.8 ms |
-| Smooth | 300 ms | pass | 441/451 | 814 | 279.0 ms | |
-| Smooth | 300 ms | pass | 433/444 | 813 | 302.6 ms | |
-| Smooth | 300 ms | pass | 455/465 | 820 | 304.4 ms | |
+| Smooth | 300 ms | pass | 441/451 | 814 | 2 | 279.0 ms |
+| Smooth | 300 ms | pass | 433/444 | 813 | 2 | 302.6 ms |
+| Smooth | 300 ms | pass | 455/465 | 820 | 2 | 304.4 ms |
 
 Low's failure is the one already understood from the jitter case: the picture
 timeline never settles, so presentation falls back to arrival pacing (residence
