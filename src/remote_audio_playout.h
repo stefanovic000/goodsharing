@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "audio_playout.h"
 #include "audio_playout_sink.h"
 #include "remote_share.h"
@@ -89,6 +89,7 @@ private:
     // picture. The common clock already anchors sender time D after capture, so
     // senderAt(now) is the sender position that should be audible at now.
     std::int64_t bufferUs_=0;
+    std::int64_t videoWaitLimitUs_=80000; // profile wait bound; age gates follow it
     std::optional<std::int64_t> delayedSender(std::int64_t now)const;
     void logGap(const char* reason,std::int64_t detailMs=0);
     std::function<void(const QString&)> logger_;

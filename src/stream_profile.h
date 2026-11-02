@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <cstdint>
+#include <cstdlib>
 #include <stdexcept>
 #include <string_view>
 
@@ -30,13 +31,23 @@ struct StreamTiming {
 };
 
 inline StreamTiming streamTiming(StreamProfile profile) {
+    // Test-only: exercise a buffer the shipped profiles do not use, so the large
+    // values in docs/70 can be measured without changing the defaults.
+    const char* overrideUs=std::getenv("GOODSHARING_TEST_BUFFER_US");
+    StreamTiming timing;
     switch(profile) {
-    // buffer + headroom are 45+35 = 80, 55+35 = 90 and 55+55 = 110 ms. The 150 and`n    // 300 ms values in docs/70 are deliberately not shipped: measured 2026-11-02 they`n    // bring back the reset storm (711-1429 resets, no audio admitted).
-    case StreamProfile::LowLatency: return {45000,35000,4000,120000};
-    case StreamProfile::Smooth: return {55000,55000,4000,250000};
-    case StreamProfile::Balanced: break;
+    // buffer + headroom are 45+35 = 80, 55+35 = 90 and 55+55 = 110 ms. The 150 and
+    // 300 ms values in docs/70 are deliberately not shipped: measured 2026-11-02
+    // they bring back the reset storm (711-1429 resets, no audio admitted).
+    case StreamProfile::LowLatency: timing={45000,35000,4000,120000};break;
+    case StreamProfile::Smooth: timing={55000,55000,4000,250000};break;
+    case StreamProfile::Balanced: timing={55000,35000,4000,150000};break;
     }
-    return {55000,35000,4000,150000};
+    if(overrideUs){
+        const auto value=std::atol(overrideUs);
+        if(value>=5000&&value<=600000){timing.bufferUs=value;timing.headroomUs=50000;}
+    }
+    return timing;
 }
 
 inline const char* streamProfileName(StreamProfile profile) {

@@ -394,13 +394,15 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
             sender.kill()
         result['sender_exit'] = sender.returncode
         view, send = (json.loads((folder / name).read_text()) for name in ('viewer.json', 'sender.json'))
-        # Lead/wait follow the profile: low 45/80, balanced 55/90, smooth 55/110 ms.
+        # Lead/wait come from the profile the app reports, so a larger presentation
+        # buffer is judged against its own bound rather than the old fixed leads.
         profile_name = 'smooth' if (case == 'smooth' or args.profile == 'auto') else (args.profile or 'balanced')
-        profile_lead = {'low': 90, 'balanced': 100, 'smooth': 120}[profile_name]
         profile_fill = .90 if case == 'smooth' else .95
         video = view.get('video') or view.get('last_selection', {}).get('video', {})
         playback = view.get('playback') or view.get('last_selection', {}).get('playback', {})
         stopped = view['after_stop'].get('last_selection', {}).get('playback', {})
+        profile_lead = playback.get('target_video_lead_ms', 55) + 25
+        profile_wait = playback.get('video_presentation_wait_limit_ms', profile_lead + 30)
         audio, endpoint = stopped.get('audio', {}), stopped.get('endpoint', {})
         observed = view['audio_observer']
         checks = dict(
@@ -440,8 +442,8 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
                           live_window_coverage=audio.get('estimated_media_window_coverage', 0) >= .95,
                           bounded_output_gap_recovery=audio.get('endpoint_gap_resets', 9999) <= 3,
                           bounded_av_lag=audio.get('maximum_estimated_av_lag_ms', 9999) <= 80,
-                          bounded_common_video_lead=audio.get('maximum_aligned_video_lead_ms', 9999) <= profile_lead + audio.get('maximum_video_presentation_advance_ms', 0),
-                          bounded_video_presentation_wait=audio.get('maximum_video_presentation_wait_ms', audio.get('maximum_aligned_video_lead_ms', 9999)) <= profile_lead,
+                          bounded_common_video_lead=audio.get('maximum_aligned_video_lead_ms', 9999) <= profile_wait + audio.get('maximum_video_presentation_advance_ms', 0),
+                          bounded_video_presentation_wait=audio.get('maximum_video_presentation_wait_ms', audio.get('maximum_aligned_video_lead_ms', 9999)) <= profile_wait,
                           bounded_video_presentation_advance=audio.get('maximum_video_presentation_advance_ms', 0) <= 20,
                           bounded_draw_lag=video.get('recent_p95_draw_lateness_ms', 9999) <= 40)
             if clock_profile in ('server-only-500ms', '500ms'):

@@ -203,6 +203,7 @@ void RemoteAudioPlayout::configureTiming(std::int64_t leadUs,std::int64_t videoW
     // The lead is the presentation delay (stream_profile.h derives one from the
     // other), so it doubles as the delayed-timeline buffer. The test hook keeps
     // the old source for an A/B control on the same binary.
+    videoWaitLimitUs_=videoWaitLimitUs;
     bufferUs_=qEnvironmentVariableIntValue("GOODSHARING_TEST_OLD_TIMELINE")?0:leadUs;
     core_.configureTiming(leadUs,videoWaitLimitUs,bufferUs_);
 }
@@ -244,7 +245,7 @@ bool RemoteAudioPlayout::presented(const std::shared_ptr<RemoteShare>& video,Pre
 }
 bool RemoteAudioPlayout::presentedLocked(PresentationTicket ticket){
     const auto now=clock_();
-    if(!presentationRequired_||!validLocked(ticket)||now<ticket.deadlineUs||now-ticket.deadlineUs>80000||!admit(false,[]{}))return false;
+    if(!presentationRequired_||!validLocked(ticket)||now<ticket.deadlineUs||now-ticket.deadlineUs>core_.configuredVideoLifetimeUs()||!admit(false,[]{}))return false;
     if(ticket.timelineDeadlineUs)advancedVideoPresentations_++;
     presentedSerial_=ticket.serial;presentedSender_=ticket.senderUs;presentedLocal_=now;presentedFrames_++;return true;
 }
@@ -275,7 +276,7 @@ RemoteAudioPlayout::Pump RemoteAudioPlayout::pump(){
     const auto delayed=delayedSender(clock_());
     if(presentationRequired_){
         if(presentedSerial_!=core_.stats().resetSerial&&!audioContinuity&&!delayed){presentationWaits_++;return Pump::Waiting;}
-        if(!audioContinuity&&presentedLocal_&&clock_()-presentedLocal_>80000){auto event=resetContext(5,core_.lastVideoClock(),clock_(),split_?selection_->selected():watch);
+        if(!audioContinuity&&presentedLocal_&&clock_()-presentedLocal_>bufferUs_+videoWaitLimitUs_){auto event=resetContext(5,core_.lastVideoClock(),clock_(),split_?selection_->selected():watch);
             core_.resetTiming();rememberReset(std::move(event));presentationResets_++;presentationAgeResets_++;if(!flush())return Pump::Failed;return Pump::Reset;}
     }
     // Reserve outside the watch lock. A revoke during preparation must win
@@ -297,7 +298,7 @@ RemoteAudioPlayout::Pump RemoteAudioPlayout::pump(){
         // the full timeline fence above or below.
         const bool preserve=stats.anchored&&stats.alignmentLocked&&!stats.resetPending&&end>0&&
             now-end>=-30000&&now-end<=30000&&now-core_.lastVideoArrival()<=core_.configuredVideoLifetimeUs()&&
-            now-presentedLocal_<=80000;
+            now-presentedLocal_<=bufferUs_+videoWaitLimitUs_;
         if(preserve){endpointTimelinePreserved_++;event.deviceOnlyRecovery=true;}
         else core_.resetTiming();
         rememberReset(std::move(event));endpointGapResets_++;if(!flush())return Pump::Failed;return Pump::Reset;
@@ -323,7 +324,7 @@ RemoteAudioPlayout::Pump RemoteAudioPlayout::pump(){
             if(!presentedLocal_){
                 const auto now=clock_();
                 if(!anchorWaitStartUs_)anchorWaitStartUs_=now;
-                if(now-anchorWaitStartUs_<=300000){
+                if(now-anchorWaitStartUs_<=bufferUs_+300000){
                     sink_.cancel();presentationLeadWaits_++;return Pump::Waiting;
                 }
                 audioStartedWithoutVideo_++;

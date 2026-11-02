@@ -231,3 +231,27 @@ valid position relative to the last painted picture.
 Acceptance numbers for the model change, taken from the passing run: roughly 3
 resets, ~527 drawn of ~531 admitted, over 1000 admitted audio blocks and a first
 audible block near 15 ms â€” repeated across runs, not a single green one.
+
+### Second attempt: gates follow the profile, buffers still not stable
+
+Three more couplings to the old lead were removed: the ticket-age and last-paint
+age gates used a literal 80 ms (they now use the profile wait bound and
+buffer+wait), the first-picture head start stopped at 300 ms (now buffer+300 ms),
+and the harness lead/wait gates now read `target_video_lead_ms` and
+`video_presentation_wait_limit_ms` from the run report instead of a table fixed
+at 90/100/120 ms. `GOODSHARING_TEST_BUFFER_US` exercises a buffer without
+changing the shipped profiles.
+
+Measured with that build, still not shippable:
+
+| Buffer | Result | drawn | audio blocks | first audio | resets |
+| --- | --- | --- | --- | --- | --- |
+| 150 ms | fail | 519/529 | 1177 | 4.8 s | 8 |
+| 150 ms (repeat) | fail | storm | — | — | hundreds |
+| 300 ms | fail | 161/517 | 0 | — | 713 |
+| 45/55 ms defaults | pass | 513-996 of 517-1008 | 889-1173 | 13-30 ms | 2-3 |
+
+So 150 ms is now close - video and audio both flow, nothing storms on the good
+run - but its audio needs 4.8 s to start and it still storms on repeat. 300 ms
+still livelocks. The shipped profiles therefore stay at 45/55 ms, where the full
+matrix and the native suite are green.
