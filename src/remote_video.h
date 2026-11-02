@@ -27,6 +27,10 @@ public:
     void setTiming(Timing timing);
     // Stream profile: minimum spacing between presented pictures, before binding.
     void setPresentationFloor(std::int64_t spacingUs); // before bind; absent means video-only
+    // Presentation delay this handoff must tolerate (docs/70 step 3): keeps the
+    // 150 ms staleness budget as the floor and lets a larger buffer hold a picture
+    // long enough to be painted instead of expiring it on arrival.
+    void setBuffer(std::int64_t bufferUs); // before bind
     void setFrameReady(std::function<void()> callback); // before bind; called off Qt
     void bind(const std::shared_ptr<RemoteShare>& watch);
     void submit(livekit::VideoFrameEvent& event);
@@ -58,7 +62,7 @@ private:
     std::function<void()> frameReady_;
     bool warming_=false;std::size_t warmHigh_=0;
     struct Pending{QImage image;PresentationTicket ticket;Clock::time_point received{};std::uint64_t revision=0;unsigned sourceFrameId=0;bool untimed=false;};
-    std::array<Pending,6> pending_{}; // ceil(80 ms * 60 FPS) plus one ingress slot
+    std::array<Pending,24> pending_{}; // 24 slots cover a 300 ms buffer at 60 FPS
     std::size_t pendingHead_=0,pendingCount_=0,pendingHigh_=0;
     std::optional<PresentationTicket> shownTicket_;
     std::uint64_t pendingDrops_=0,nextDuePreserved_=0,unclocked_=0,timedDraws_=0;
@@ -94,7 +98,8 @@ private:
     void finishPresented(bool distinct,std::int64_t selected);
     void recordMotion(unsigned sourceFrameId,std::int64_t drawnUs,std::int64_t deadlineUs,std::uint64_t revision);
     bool admit(const std::shared_ptr<RemoteShare>& watch,const std::function<void()>& operation)const;
-    static constexpr auto lifetime=std::chrono::milliseconds(150);
+    static constexpr auto nominalLifetime=std::chrono::milliseconds(150);
+    std::chrono::milliseconds lifetime=nominalLifetime; // setBuffer raises it with the buffer
     static constexpr std::int64_t nominalMinimumPresentationSpacingUs=10000;
     std::int64_t minimumPresentationSpacingUs_=qEnvironmentVariableIntValue("GOODSHARING_TEST_DISABLE_PRESENTATION_FLOOR")?0:nominalMinimumPresentationSpacingUs;
 };
