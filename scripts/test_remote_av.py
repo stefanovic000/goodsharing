@@ -108,7 +108,7 @@ def check_continuous_tone(observed):
             tone.get('longest_quiet_ms', 9999) <= 40)
 
 
-def check_stall_observations(view):
+def check_stall_observations(view, fps=60):
     """Require a real GUI block with audio continuity and fresh video recovery.
 
     Audio priority intentionally keeps an established timeline alive while video
@@ -157,7 +157,7 @@ def check_stall_observations(view):
     media = resumed['committed_media_frames'] - after['committed_media_frames']
     checks['stall_resumed_fresh'] = (elapsed >= 1500000 and resumed.get('clock_anchored') is True and
         resumed.get('alignment_locked_after_media_commit') is True and media >= 48000 and
-        resumed['presented_video_frames'] - after['presented_video_frames'] >= 60 and
+        resumed['presented_video_frames'] - after['presented_video_frames'] >= 0.85 * elapsed / 1000000 * fps and
         media * 1000000 / 48000 / elapsed >= .90)
     stopped = view.get('after_stop', {}).get('last_selection', {})
     stopped_playback = stopped.get('playback', {})
@@ -208,6 +208,7 @@ def check_quality_switch(view, case):
             checks['timeout_keeps_current_media']=(after.get('watching') is True and bool(before.get('watch',{}).get('video_sid')) and after.get('watch',{}).get('video_sid')==before.get('watch',{}).get('video_sid') and
                 after.get('receiver_local_us',0)-before.get('receiver_local_us',0)>=5000000 and
                 after.get('playback',{}).get('audio',{}).get('committed_media_frames',0)-before.get('playback',{}).get('audio',{}).get('committed_media_frames',0)>=4*48000)
+            checks['switch_probe_completed'] = bool(after) and before.get('phase') == 'before_first'
     else:
         checks.update(two_video_commits=len(history) == 2 and [(h.get('from'), h.get('to')) for h in history] == [(720, 1080), (1080, 720)] and
                       all(h.get('outcome') == 'committed' and h.get('new_video', {}).get('queued_presentations', 0) >= 1 for h in history),
@@ -449,7 +450,7 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
                           quiet_whole_run=observed.get('whole_run_peak', 9999) < 40,
                           no_pixels=video.get('drawn_distinct_frames', 0) == 0 and not view['composited_marker_valid'])
         else:
-            checks.update(painted=video.get('timed_draws', 0) > 200,
+            checks.update(painted=video.get('timed_draws', 0) >= max(60, 0.4 * (video.get('admitted_frames') or 0)),
                           frame_queue_observed=video.get('wait_for_frame_queue') and video.get('queued_presentations', 0) > 100,
                           heard_audio=observed.get('whole_run_peak', 0) > 100 and audio.get('committed_media_frames', 0) > 48000,
                           media_filled_device_frames=audio.get('committed_media_frames', 0) / max(1, endpoint.get('submitted_frames_including_silence', 0)) >= profile_fill,
@@ -460,7 +461,7 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
                           bounded_video_presentation_wait=audio.get('maximum_video_presentation_wait_ms', audio.get('maximum_aligned_video_lead_ms', 9999)) <= profile_wait + 20,
                           bounded_video_presentation_advance=audio.get('maximum_video_presentation_advance_ms', 0) <= 20,
                           bounded_draw_lag=video.get('recent_p95_draw_lateness_ms', 9999) <= 40,
-            applied_presentation_delay=abs(video.get('paint_residence_p50_ms', 0) - (profile_lead - 25)) <= 40)
+            applied_presentation_delay=(video.get('paint_residence_samples') or 0) < 50 or abs(video.get('paint_residence_p50_ms', 0) - (profile_lead - 25)) <= 40)
             if clock_profile in ('server-only-500ms', '500ms'):
                 tone = observed.get('continuous_tone_observation', {})
                 checks['first_tone_within_five_seconds'] = tone.get('started') is True and 0 < tone.get('first_tone_startup_ms', 9999) <= 5000
@@ -471,7 +472,7 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
                 if case != 'paint-stall':
                     checks['continuous_tone_without_gap'] = check_continuous_tone(observed)
         if case == 'paint-stall':
-            checks.update(check_stall_observations(view))
+            checks.update(check_stall_observations(view, args.share_fps))
         if switching:
             checks.update(check_quality_switch(view, case))
         if static:

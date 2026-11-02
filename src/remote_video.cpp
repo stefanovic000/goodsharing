@@ -215,7 +215,9 @@ bool RemoteVideo::preparePaint(const QRectF& bounds,std::shared_ptr<RemoteShare>
 void RemoteVideo::markPainted(bool distinct,std::int64_t selected) {
     if(!distinct)return;
     drawnRevision_=selected;drawn_++;
-    {const auto paintedUs=localUs();const auto arrivalUs=std::chrono::duration_cast<std::chrono::microseconds>(received_.time_since_epoch()).count();
+    // Only timed presentations are sampled: an arrival-paced picture after the source
+    // stops is painted immediately and would drag the profile median down.
+    if(timing_.schedule&&!shownUntimed_){const auto paintedUs=localUs();const auto arrivalUs=std::chrono::duration_cast<std::chrono::microseconds>(received_.time_since_epoch()).count();
      if(paintedUs>arrivalUs){const auto residence=paintedUs-arrivalUs;residence_[residenceCursor_++%residence_.size()]=residence;residenceCount_=std::min(residenceCount_+1,residence_.size());maximumResidenceUs_=std::max(maximumResidenceUs_,residence);}}
     lastPresentationUs_=localUs();
     if(!timing_.schedule){untimedSwapPending_=true;untimedSwapSourceFrameId_=selectedSourceFrameId_;untimedSwapRevision_=selected;}

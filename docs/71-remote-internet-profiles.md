@@ -61,6 +61,6 @@ recorded is absorbed by time, not by rate limiting or FEC. FEC may still be need
 for loss (the docs/70 loss case shows 10% erasure defeats every profile), but jitter
 alone no longer does.
 
-This is not yet a two-machine test: both clients share one PC's clock, uplink and
-capture path. It also does not measure glass-to-glass latency, only the receiver-side
+This is not a two-machine test: both clients share one PC's clock, uplink and
+capture path, and the project's earlier two-machine run (docs/67, 2026-10-31: 3038/3038 admitted, 2329 drawn, 0 ms quiet) predates the profiles and should be repeated with Smooth. It also does not measure glass-to-glass latency, only the receiver-side
 residence. Both remain open.

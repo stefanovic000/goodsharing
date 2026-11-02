@@ -426,3 +426,28 @@ the frame metadata but in the sender's own steady clock, which the playout canno
 (the attempted `localFor(captureTimestampUs)` produced zero samples before it was
 removed). Closing that needs the sender to publish a capture-to-NTP relation, which is
 a real protocol change rather than a measurement.
+## Seventeen-case sweep (2026-11-02)
+
+Running every case in the harness at 720p/30fps gave 16 of 17 on the first attempt.
+The miss was `low` on `continuous_tone_without_gap`. Retries showed it is the
+profile most sensitive to machine load rather than deterministically broken: three
+consecutive `low` runs failed on three *different* gates (tone gap, `stereo_output`,
+`composited_marker`) and six consecutive runs in a second batch all passed, with or
+without its buffer raised to 70 ms. Low is 45 ms and sits closest to this machine's
+scheduling jitter, which matches the jitter-case result where it was also the first to
+fail.
+
+Four harness faults surfaced only because that sweep existed:
+
+- `painted` required a fixed 200 timed pictures, which short runs (source-exit)
+  cannot reach. It now requires 40 % of the pictures the receiver admitted, floor 60 -
+  which still catches a stalled presentation (110 of 515 = 21 %).
+- Residence sampled every paint, so an arrival-paced tail after the source stopped
+  dragged the median to ~21 ms on source-exit cases. It now samples timed pictures
+  only, and those runs read 158-167 ms as the profile intends.
+- `stall_resumed_fresh` demanded 60 recovered pictures in 2 s, i.e. 30 fps of
+  recovery, while the paint-stall case runs at 30 fps. The requirement now scales
+  with the run's frame rate (56 of ~57 at 30 fps passes).
+- `switch_probe_completed` required an adopted switch for every switch case,
+  including `switch-timeout`, whose whole point is that no switch happens. For that
+  case it now requires the timeout observation to exist.
