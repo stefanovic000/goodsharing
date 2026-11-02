@@ -90,6 +90,11 @@ class CpuSampler(threading.Thread):
 
 
 
+def playback_summary_present(view):
+    """True when the viewer actually reached playback; used to separate a run that
+    never started from one that degraded."""
+    return bool((view.get('playback') or {}).get('started') or (view.get('last_selection') or {}).get('playback'))
+
 def checkpoint_count(path):
     # QSaveFile replaces this owned snapshot atomically. On Windows a brief
     # sharing conflict while it is replaced is not a completed observation.
@@ -415,6 +420,18 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
                 time.sleep(.05)
         if view is None or send is None:
             raise RuntimeError('Viewer or sender report was not readable after the run')
+        # A run can die before it ever watches anything. Say that plainly instead of
+        # marking a dozen media checks failed: the distinction is "never started"
+        # versus "started and degraded", and only the second is a media problem.
+        startup_evidence = None
+        if not playback_summary_present(view):
+            log_texts = {}
+            for name in ('viewer', 'sender', 'source'):
+                path = folder / (name + '.log')
+                log_texts[name] = path.read_text(errors='ignore')[:600] if path.exists() else '<missing>'
+            startup_evidence = dict(viewer_exit=viewer.returncode, sender_exit=sender.returncode,
+                                    source=source_info, logs=log_texts)
+            result['startup_evidence'] = startup_evidence
         # Lead/wait come from the profile the app reports, so a larger presentation
         # buffer is judged against its own bound rather than the old fixed leads.
         # The profile the app actually runs: the case name pins low/smooth, otherwise
@@ -542,7 +559,11 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
                 checks['sender_audio_continued'] = send.get('capture', {}).get('audio_blocks_admitted', 0) >= 1500
                 checks['audio_timeline_recovered'] = c['playback']['audio']['clock_anchored'] is True and delivered[2] > delivered[1]
         checks['no_remaining_participants'] = (not fixture.participants(room)) if fixture else True
-        result.update(viewer=view, sender=send, checks=checks, passed=all(checks.values()))
+        if startup_evidence:
+            # One clear verdict beats a dozen media checks that could not apply.
+            checks = {'session_started': False}
+        ends_with_media_or_startup = all(checks.values())
+        result.update(viewer=view, sender=send, checks=checks, passed=ends_with_media_or_startup)
     except Exception as error:
         result['error'] = str(error)
     finally:

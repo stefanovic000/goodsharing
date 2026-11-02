@@ -178,3 +178,24 @@ window ownership rather than the media path. The next step is to capture the sen
 first log lines and the fixture's window handle for the failing attempt, and to make
 the harness report "never started" distinctly from "started and degraded" instead of
 marking a dozen media checks failed.
+
+## Reporting a run that never started
+
+The harness now separates "never started" from "started and degraded". If the viewer
+report carries no playback state, the run records `startup_evidence` (both exit codes,
+the fixture's window record and the first 600 bytes of each log) and its verdict
+becomes a single `session_started` failure instead of a dozen media checks that could
+not apply.
+
+Verified by pointing the harness at a server that does not exist: the run reports
+`{"session_started": false}` with `viewer_exit = 3, sender_exit = 3` and the three log
+heads captured, instead of twenty meaningless check failures. Healthy runs record no
+evidence and are unaffected.
+
+## Machine load matters for the margins
+
+Repeated measurements on a PC that had run several hundred media sessions in one day
+(`audiodg` alone at 8778 CPU-seconds) showed the marginal gates moving: Low's audio
+coverage came out at 0.945 once and 0.969-0.992 on three immediate repeats, against a
+0.95 gate. That is the environment, not a regression, and it is worth remembering
+before treating a single 0.94-something as a product fault.
