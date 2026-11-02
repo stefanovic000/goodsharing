@@ -63,7 +63,7 @@ python scripts/test_remote_av.py --case 1080 --share-fps 60 --profile smooth
 python scripts/test_remote_av.py --case 720 --server-url ws://<sfu>:7880   # over the internet
 ```
 
-Each run writes `summary.json` with frames submitted/admitted/drawn, paint times, audio gaps and coverage, A/V lag bounds, per-process CPU, and machine load:
+Each run writes `summary.json` with frames submitted/admitted/drawn, paint times, audio gaps and coverage, A/V lag bounds, per-process CPU, and machine load. `--case all` runs every case; it currently passes 17 of 17 at 30 fps, and `--case 720` repeated ten times passed ten times with 0 ms of audio silence and one 168–176 ms picture hold per run.
 
 | Metric | Meaning |
 | --- | --- |
@@ -79,7 +79,7 @@ Working and tested end to end: sharing, watching, audio, E2EE, multi-share, 720p
 Known limitations, in priority order:
 
 1. **Packet loss cannot be buffered away** (docs/70): at 10% loss every profile fails with the same coverage, so the next lever is FEC/retransmission.
-2. **Video flicker under packet loss** on Wi-Fi: frames arrive in 150–200 ms clumps; the client freezes the last picture instead of blanking, but recovery depends on keyframes rather than per-packet repair.
+2. **Video flicker under packet loss** on Wi-Fi: frames arrive in 150–200 ms clumps. The client holds the last picture instead of blanking, and past a 200 ms grace it presents a late catch-up rather than freezing indefinitely, but recovery still depends on keyframes rather than per-packet repair.
 3. **CPU presentation** (`QQuickPaintedItem`) caps 1080p60 at roughly 50–56 fps presented.
 4. **Not code-signed**, so SmartScreen warns on first run.
 5. **Token issuance is manual** — room tokens are minted out of band; a production deployment needs an auth service and per-room key distribution.
