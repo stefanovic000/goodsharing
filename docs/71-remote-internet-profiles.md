@@ -44,6 +44,14 @@ slot) and the `painted`/`frame_queue_observed` gates fail. Balanced and Smooth h
 the timeline, and their residence matches the configured buffer, so the delay really
 is being applied across the internet hop.
 
+## The packaged build, over the same path
+
+The portable package (``packaging/dist/GoodSharing-0.1.0-win64``, app sha256
+``41DB380B06E2B9CA``) was rebuilt from this source and run against the same VM with
+``--app-exe``: pass, 483/493 drawn, 1118 audio blocks, residence 296.6 ms, no failed
+checks. So the artifact a user would actually run is the one that was measured here,
+not just the build tree.
+
 ## What it means
 
 The internet path's jitter exceeds the 45 ms budget, which is exactly the condition
