@@ -101,7 +101,9 @@ Proven: the watchdog does **not** fire in healthy runs (0 restarts across 720p,
 1080p, static, minimized, switch-timeout and source-exit cases after the change), and
 the whole suite still passes.
 
-Not proven: that it recovers from the real failure. Provoking a mid-run stall needs a
+Proven since: with GOODSHARING_TEST_AUDIO_DROP=100 and GOODSHARING_TEST_DROP_AFTER_MS=10000 the report shows udio_retry_attempts = 1, so the watchdog fires and the app asks for a fresh subscription instead of staying silent (a healthy run reports 0).
+
+Still not proven: that this recovers from the *real* delivery stall, whose cause is unknown; and the stall was not reproduced in four 45 s soaks (133 s of audio, 0 ms quiet, coverage 1.000, no retries). Provoking a mid-run stall needs a
 drop that starts partway through, `GOODSHARING_TEST_AUDIO_DROP` with
 `GOODSHARING_TEST_DROP_AFTER_MS`; the run that used it lost audio entirely and left
 the report showing the post-restart session, so the counter could not confirm the

@@ -371,6 +371,7 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
                     raise RuntimeError('First observation did not arrive before the minimize deadline')
                 time.sleep(.05)
             (folder / 'minimize-owned-source').write_text('minimize this owned fixture')
+            deadline = time.monotonic() + 8  # fresh budget: the first wait may have used most of 17 s
             while checkpoint_count(checkpoints) < 2:
                 if viewer.poll() is not None or time.monotonic() > deadline:
                     raise RuntimeError('Second observation did not arrive after minimizing the source')
@@ -389,7 +390,7 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
                         readiness.get('committed_media_frames', 0) >= 96000 and readiness.get('presented_video_frames', 0) >= 120):
                     raise RuntimeError('Source-close marker did not prove established A/V playback')
             if static:
-                checkpoints = folder / 'checkpoints.json'
+                checkpoints = folder / 'checkpoints.json'; deadline = time.monotonic() + 8
                 while checkpoint_count(checkpoints) < 2:
                     if viewer.poll() is not None or time.monotonic() > deadline:
                         raise RuntimeError('Static checkpoints did not arrive before source-close deadline')

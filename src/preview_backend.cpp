@@ -720,7 +720,7 @@ QJsonObject PreviewBackend::viewingReport()const {
         extraReports.append(QJsonObject{{"slot",static_cast<int>(i)+1},{"quality",extras_[i]->selection.quality},
             {"watch",extras_[i]->watch?extras_[i]->watch->report():QJsonObject{}},
             {"video",extras_[i]->frames?extras_[i]->frames->report():QJsonObject{}}});
-    return {{"watching",watching()},{"busy",watchBusy()},{"status",remoteStatus_},{"source_minimized",remoteSourceMinimized_},
+    return {{"audio_retry_attempts",audioRetryAttempts_},{"watching",watching()},{"busy",watchBusy()},{"status",remoteStatus_},{"source_minimized",remoteSourceMinimized_},
         {"slot_count",slotCount()},{"slots",QJsonValue::fromVariant(watchSlots())},{"extras",extraReports},
         {"video",remoteVideo_?remoteVideo_->report():QJsonObject{}},
         {"watch",watch_?watch_->report():retiringWatch_?retiringWatch_->report():QJsonObject{}},{"audio_watch",audioWatch_?audioWatch_->report():QJsonObject{}},
