@@ -1,4 +1,4 @@
-# Stream profiles: latency versus smoothness
+﻿# Stream profiles: latency versus smoothness
 
 Date: 2026-10-28, Europe/Budapest
 
@@ -10,11 +10,16 @@ between sessions.
 
 ## Profiles
 
-| Profile | Common lead | Video wait bound | Presentation floor | Sender capture age |
+| Profile | Presentation buffer | Video wait bound | Presentation floor | Sender capture age |
 | --- | ---: | ---: | ---: | ---: |
-| Low latency | 25 ms | 80 ms | 10 ms | 120 ms |
-| Balanced (default, previous behaviour) | 30 ms | 80 ms | 10 ms | 150 ms |
-| Smooth | 50 ms | 80 ms | 10 ms | 250 ms |
+| Low latency | 45 ms | 80 ms | 4 ms | 120 ms |
+| Balanced (default) | 150 ms | 200 ms | 4 ms | 150 ms |
+| Smooth | 300 ms | 350 ms | 4 ms | 250 ms |
+
+These are the values shipped after docs/70 replaced the two independently tuned
+numbers with one presentation buffer plus headroom: lead = buffer, wait =
+buffer + headroom. The original 25/30/50 ms leads are superseded; the presentation
+floor moved from 10 ms to 4 ms in docs/54.
 
 The lead is the common audio/video target: how far ahead of the mapped sender
 timeline playout sits. Larger values absorb jitter at the cost of delay. The
