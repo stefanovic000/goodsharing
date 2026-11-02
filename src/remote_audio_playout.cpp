@@ -261,6 +261,8 @@ bool RemoteAudioPlayout::flush(){
 RemoteAudioPlayout::Pump RemoteAudioPlayout::fail(){failed_=closed_=true;selection_->stop();core_.revoke();flush();return Pump::Failed;}
 RemoteAudioPlayout::Pump RemoteAudioPlayout::pump(){
     std::lock_guard lock(mutex_);if(failed_)return Pump::Failed;if(stopped_)return Pump::Closed;
+    const auto noteReset=[&](const char* tag,std::int64_t a,std::int64_t b,std::int64_t ref){if(traceEnabled_)qWarning("reset %s a=%lld b=%lld horizon=%lld presented=%lld ref=%lld",tag,static_cast<long long>(a),static_cast<long long>(b),static_cast<long long>(horizonUs_),static_cast<long long>(presentedSender_),static_cast<long long>(ref));if(traceEnabled_&&logger_)logger_(QString("reset %1 a=%2 b=%3 horizon=%4 presented=%5 ref=%6")
+        .arg(tag).arg(a).arg(b).arg(horizonUs_).arg(presentedSender_).arg(ref));};
     if(traceEnabled_){const auto now=clock_();pumpGapUs_=previousPumpUs_?now-previousPumpUs_:0;previousPumpUs_=now;}
     const auto watch=watch_.lock();
     if(!bound_||!admit(true,[]{}))denied(watch);
@@ -277,7 +279,7 @@ RemoteAudioPlayout::Pump RemoteAudioPlayout::pump(){
     if(presentationRequired_){
         if(presentedSerial_!=core_.stats().resetSerial&&!audioContinuity&&!delayed){presentationWaits_++;return Pump::Waiting;}
         if(!audioContinuity&&presentedLocal_&&clock_()-presentedLocal_>bufferUs_+videoWaitLimitUs_){auto event=resetContext(5,core_.lastVideoClock(),clock_(),split_?selection_->selected():watch);
-            core_.resetTiming();rememberReset(std::move(event));presentationResets_++;presentationAgeResets_++;if(!flush())return Pump::Failed;return Pump::Reset;}
+            core_.resetTiming();rememberReset(std::move(event));presentationResets_++;presentationAgeResets_++;noteReset("age",clock_()-presentedLocal_,0,presentedSender_);if(!flush())return Pump::Failed;return Pump::Reset;}
     }
     // Reserve outside the watch lock. A revoke during preparation must win
     // the second admission check at the actual device commit below.
@@ -301,7 +303,7 @@ RemoteAudioPlayout::Pump RemoteAudioPlayout::pump(){
             now-presentedLocal_<=bufferUs_+videoWaitLimitUs_;
         if(preserve){endpointTimelinePreserved_++;event.deviceOnlyRecovery=true;}
         else core_.resetTiming();
-        rememberReset(std::move(event));endpointGapResets_++;if(!flush())return Pump::Failed;return Pump::Reset;
+        rememberReset(std::move(event));endpointGapResets_++;noteReset("endpointGap",gap.gapUs,0,presentedSender_);if(!flush())return Pump::Failed;return Pump::Reset;
     }catch(...){sink_.cancel();return fail();}
     if(!window){sink_.cancel();return Pump::Waiting;}
     if(!window->frames||window->frames>AudioPlayout::blockFrames){sink_.cancel();return fail();}
@@ -315,7 +317,7 @@ RemoteAudioPlayout::Pump RemoteAudioPlayout::pump(){
         auto source=core_.senderAt(window->firstAudibleUs);
         if(source)*source+=static_cast<std::int64_t>(window->frames-1)*1000000/48000;
         if(!source||*source-reference < -horizonUs_){
-            sink_.cancel();core_.resetTiming();presentationResets_++;presentationLagResets_++;if(!flush())return Pump::Failed;return Pump::Reset;
+            sink_.cancel();core_.resetTiming();presentationResets_++;presentationLagResets_++;noteReset("lag",0,0,presentedSender_);if(!flush())return Pump::Failed;return Pump::Reset;
         }
         if(*source-reference>horizonUs_){
             // Before the first picture is presented there is no anchor to wait for,
@@ -351,7 +353,7 @@ RemoteAudioPlayout::Pump RemoteAudioPlayout::pump(){
     trace({3,renderNow,0,window->firstAudibleUs,front,queued,rendered.mediaFrames,rendered.outputFrames});
     if(rendered.sourceLeadWait)presentationLeadWaits_++;
     if(rendered.sourceLagReset){presentationResets_++;presentationLagResets_++;}
-    if(rendered.resetRequired){sink_.cancel();if(!flush())return Pump::Failed;return Pump::Reset;}
+    if(rendered.resetRequired){noteReset("render",rendered.firstSourceUs,rendered.lastSourceUs,presentedSender_);sink_.cancel();if(!flush())return Pump::Failed;return Pump::Reset;}
     if(!rendered.ready){
         // Starved cycle: repeat the last block for at most two windows so the device
         // never reads silence in the middle of speech.
@@ -370,7 +372,7 @@ RemoteAudioPlayout::Pump RemoteAudioPlayout::pump(){
             core_.senderAt(window->firstAudibleUs+static_cast<std::int64_t>(rendered.outputFrames-1)*1000000/48000);
         avLag=source?*source-reference:INT64_MAX;
         const auto firstLag=rendered.mediaFrames?rendered.firstSourceUs-reference:avLag;
-        if(firstLag < -horizonUs_||firstLag>horizonUs_||avLag < -horizonUs_||avLag>horizonUs_){sink_.cancel();core_.resetTiming();presentationResets_++;presentationLagResets_++;if(!flush())return Pump::Failed;return Pump::Reset;}
+        if(firstLag < -horizonUs_||firstLag>horizonUs_||avLag < -horizonUs_||avLag>horizonUs_){sink_.cancel();core_.resetTiming();presentationResets_++;presentationLagResets_++;noteReset("lag",0,0,presentedSender_);if(!flush())return Pump::Failed;return Pump::Reset;}
         if(std::abs(firstLag)>std::abs(avLag))avLag=firstLag;
     }
     const auto gain=muted_?0.f:volume_;
@@ -428,7 +430,7 @@ QJsonObject RemoteAudioPlayout::report(bool includeTestHistory)const{
         {"tail_deadline_lead_ms",tailDeadline?(*tailDeadline-reportNow)/1000.0:0},
         {"pcm_capacity_ms",core_.configuredResidenceUs()/1000.0},{"maximum_pcm_residence_ms",core_.configuredResidenceUs()/1000.0},{"target_video_lead_ms",core_.configuredLeadUs()/1000.0},
         {"maximum_endpoint_lead_ms",30},{"video_clock_lifetime_ms",150},{"scheduler_bytes",static_cast<double>(sizeof(AudioPlayout))},
-        {"admitted_audio_blocks",static_cast<double>(s.admitted)},{"unclocked",static_cast<double>(s.unclocked)},
+        {"admitted_audio_blocks",static_cast<double>(s.admitted)},{"unclocked",static_cast<double>(s.unclocked)},{"unclocked_video",static_cast<double>(s.unclockedVideo)},{"unclocked_audio",static_cast<double>(s.unclockedAudio)},
         {"invalid",static_cast<double>(s.invalid)},{"late_input_blocks",static_cast<double>(s.lateInput)},
         {"early_video_drops",static_cast<double>(s.earlyVideoDrops)},
         {"bounded_video_advance_tickets",static_cast<double>(s.boundedVideoAdvances)},

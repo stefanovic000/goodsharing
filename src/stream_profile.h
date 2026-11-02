@@ -18,8 +18,8 @@ enum class StreamProfile : int { LowLatency=0, Balanced=1, Smooth=2 };
 // profile was tuned with are unchanged; only bufferUs is expected to grow once the
 // delayed timeline replaces the presented-reference coupling.
 struct StreamTiming {
-    std::int64_t bufferUs=55000;             // presentation delay for audio and video
-    std::int64_t headroomUs=35000;           // extra wait allowed for a due picture
+    std::int64_t bufferUs=150000;            // presentation delay for audio and video
+    std::int64_t headroomUs=50000;           // extra wait allowed for a due picture
     // A 60 fps cadence is 16.7 ms, so a 10 ms floor dropped every frame whose
     // deadline bunched with the previous one; 4 ms keeps a guard against
     // double-painting while letting a late picture catch up instead of vanish.
@@ -40,8 +40,8 @@ inline StreamTiming streamTiming(StreamProfile profile) {
     // 300 ms values in docs/70 are deliberately not shipped: measured 2026-11-02
     // they bring back the reset storm (711-1429 resets, no audio admitted).
     case StreamProfile::LowLatency: timing={45000,35000,4000,120000};break;
-    case StreamProfile::Smooth: timing={55000,55000,4000,250000};break;
-    case StreamProfile::Balanced: timing={55000,35000,4000,150000};break;
+    case StreamProfile::Smooth: timing={300000,50000,4000,250000};break;
+    case StreamProfile::Balanced: timing={150000,50000,4000,150000};break;
     }
     if(overrideUs){
         const auto value=std::atol(overrideUs);

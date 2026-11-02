@@ -20,12 +20,15 @@ void AudioPlayout::configureTiming(std::int64_t leadUs,std::int64_t videoWaitLim
     // 15 ms margin. The 60 ms constant stays the floor, so the shipped 45 ms profile
     // keeps its tuned residence and only larger buffers widen it.
     residenceUs_=std::max(maximumResidenceUs,bufferUs+15000);
+    // The queue must hold the whole presentation delay: 10 ms blocks, plus the two
+    // blocks in flight. A fixed six (60 ms) overflowed immediately past a 55 ms buffer.
+    capacity_=std::min(maximumBlocks,capacity+static_cast<std::size_t>(bufferUs/10000));
     videoLifetimeValueUs_=std::max(videoLifetimeUs,bufferUs+50000);
-    presentationLeadLimitUs_=std::max(maximumPresentationLeadUs,bufferUs+25000);
+    presentationLeadLimitUs_=std::max(maximumPresentationLeadUs,videoWaitLimitUs);
 }
 bool PlayoutClock::valid()const{return hasRtp&&senderUs>0&&senderUs<=5000000000000000ll&&epoch>0&&reports>=2;}
 void AudioPlayout::resetDevice(){stats_.resetPending=true;if(++stats_.resetSerial==0)++stats_.resetSerial;stats_.resets++;lastOutputEnd_=0;}
-void AudioPlayout::pop(){blocks_[head_]={};head_=(head_+1)%capacity;stats_.queued--;}
+void AudioPlayout::pop(){blocks_[head_]={};head_=(head_+1)%capacity_;stats_.queued--;}
 void AudioPlayout::invalidate(){
     const bool changed=stats_.anchored||stats_.queued;
     while(stats_.queued)pop();stats_.anchored=false;stats_.alignmentLocked=false;consecutiveLate_=0;consecutiveAlignmentRejected_=0;audioTimelineOffsetUs_=0;clearCadence();
@@ -37,7 +40,7 @@ bool AudioPlayout::localTime(std::int64_t now){
 }
 bool AudioPlayout::video(PlayoutClock clock,std::int64_t now,bool allowBoundedAdvance){
     if(stats_.closed||!localTime(now))return false;
-    if(!clock.valid()){stats_.unclocked++;invalidate();return false;}
+    if(!clock.valid()){stats_.unclocked++;stats_.unclockedVideo++;invalidate();return false;}
     if(clock.epoch<lastVideo_.epoch||(clock.epoch==lastVideo_.epoch&&clock.senderUs<=lastVideo_.senderUs)){stats_.invalid++;return false;}
     const auto delta=clock.senderUs-anchorSender_;
     const auto projected=anchorLocal_+delta;
@@ -86,7 +89,7 @@ std::optional<std::int64_t> AudioPlayout::projectVideo(PlayoutClock clock,std::i
     if(stats_.closed||!stats_.anchored||stats_.resetPending||!stats_.alignmentLocked||!clock.valid()||
        received<=0||received>maximumLocalUs||received<lastNow_||received-lastVideoLocal_>videoLifetimeValueUs_)return {};
     const auto deadline=localFor(clock.senderUs);
-    if(!deadline||*deadline-received<10000||*deadline-received>80000)return {};
+    if(!deadline||*deadline-received<10000||*deadline-received>presentationLeadLimitUs_)return {};
     return deadline;
 }
 bool AudioPlayout::adoptVideo(PlayoutClock clock,std::int64_t received,std::int64_t now,std::int64_t deadline,std::uint64_t serial){
@@ -100,7 +103,7 @@ bool AudioPlayout::adoptVideo(PlayoutClock clock,std::int64_t received,std::int6
 bool AudioPlayout::audio(PlayoutClock clock,std::span<const std::int16_t> pcm,std::int64_t now){
     if(stats_.closed||!localTime(now))return false;
     if(!clock.valid()){
-        stats_.unclocked++;
+        stats_.unclocked++;stats_.unclockedAudio++;
         if(alignAudio_&&!stats_.alignmentLocked&&stats_.anchored&&now-lastVideoLocal_<=videoLifetimeValueUs_){
             // Audio and video may train at different times. Missing startup
             // audio reports cannot invalidate an independently valid video
@@ -151,7 +154,7 @@ bool AudioPlayout::audio(PlayoutClock clock,std::span<const std::int16_t> pcm,st
                 // source phase. Discard this new block, preserving valid queued
                 // PCM, device output, the common mapping and all video tickets.
                 // Do not stitch a retained block's source span across this gap.
-                auto& previous=blocks_[(head_+stats_.queued-1)%capacity];
+                auto& previous=blocks_[(head_+stats_.queued-1)%capacity_];
                 if(previous.senderUs==audioTailClock_.senderUs&&!previous.used)previous.sourceDurationUs=sourceStep;
                 lastAudio_=audioTailClock_=clock;
                 // Keep the last admitted arrival/deadline: drops cannot extend
@@ -185,7 +188,7 @@ bool AudioPlayout::audio(PlayoutClock clock,std::span<const std::int16_t> pcm,st
                 const auto available=40000-audioTimelineOffsetUs_;
                 const auto shift=std::clamp<std::int64_t>(desired-deadline,0,std::max<std::int64_t>(0,available));
                 if(shift>=1000){
-                    for(std::size_t n=0;n<stats_.queued;n++)blocks_[(head_+n)%capacity].deadlineUs+=shift;
+                    for(std::size_t n=0;n<stats_.queued;n++)blocks_[(head_+n)%capacity_].deadlineUs+=shift;
                     if(audioTailDeadline_)audioTailDeadline_+=shift;
                     deadline+=shift;audioTimelineOffsetUs_+=shift;consecutiveLate_=0;
                     stats_.headroomRebases++;stats_.maximumHeadroomOffsetUs=std::max(stats_.maximumHeadroomOffsetUs,audioTimelineOffsetUs_);
@@ -219,7 +222,9 @@ bool AudioPlayout::audio(PlayoutClock clock,std::span<const std::int16_t> pcm,st
         stats_.alignments++;consecutiveAlignmentRejected_=0;stats_.maximumAlignedVideoLeadUs=std::max(stats_.maximumAlignedVideoLeadUs,videoLead);
         stats_.maximumPresentationLeadUs=std::max(stats_.maximumPresentationLeadUs,videoLead);
     }
-    if(deadline>now+100000){stats_.invalid++;invalidate();return false;}
+    // A block may legitimately be due as far ahead as the presentation lead plus
+    // jitter; the old fixed 100 ms limit rejected every block of a larger buffer.
+    if(deadline>now+std::max<std::int64_t>(100000,leadUs_+40000)){stats_.invalid++;invalidate();return false;}
     lastAudio_=clock;
     if(deadline+10000<now-residenceUs_){stats_.lateInput++;return false;}
     consecutiveAlignmentRejected_=0;
@@ -227,11 +232,11 @@ bool AudioPlayout::audio(PlayoutClock clock,std::span<const std::int16_t> pcm,st
         const auto correction=std::abs(deadline-(anchorLocal_+delta));
         if(correction)stats_.cadenceAdjustedBlocks++;
         stats_.maximumCadenceCorrectionUs=std::max(stats_.maximumCadenceCorrectionUs,correction);
-        if(stats_.queued){auto& previous=blocks_[(head_+stats_.queued-1)%capacity];
+        if(stats_.queued){auto& previous=blocks_[(head_+stats_.queued-1)%capacity_];
             if(previous.senderUs==audioTailClock_.senderUs&&!previous.used)previous.sourceDurationUs=sourceStep;}
     }
-    if(stats_.queued==capacity){pop();stats_.overflowBlocks++;}
-    auto& block=blocks_[(head_+stats_.queued)%capacity];
+    if(stats_.queued==capacity_){pop();stats_.overflowBlocks++;}
+    auto& block=blocks_[(head_+stats_.queued)%capacity_];
     std::copy(pcm.begin(),pcm.end(),block.pcm.begin());block.senderUs=clock.senderUs;block.receivedUs=now;block.used=0;block.deadlineUs=deadline;block.sourceDurationUs=10000;
     audioTailClock_=clock;audioTailDeadline_=deadline;audioTailArrival_=now;
     stats_.queued++;stats_.highWater=std::max(stats_.highWater,stats_.queued);stats_.admitted++;return true;
@@ -255,7 +260,7 @@ AudioPlayout::Render AudioPlayout::render(std::int64_t now,std::int64_t audible,
     if(stats_.resetPending||!stats_.anchored)return result();
     while(stats_.queued&&now-blocks_[head_].receivedUs>residenceUs_){pop();stats_.expiredBlocks++;}
     if(alignAudio_&&stats_.alignmentLocked&&audible-now>pcmWaitGuardUs){
-        const bool unknownTail=!stats_.queued||blocks_[(head_+stats_.queued-1)%capacity].deadlineUs+10000<=audible;
+        const bool unknownTail=!stats_.queued||blocks_[(head_+stats_.queued-1)%capacity_].deadlineUs+10000<=audible;
         if(unknownTail){
             // A still-future device window is not evidence of missing PCM.
             // Leave its original deadline available for ingress. At the write
@@ -264,7 +269,7 @@ AudioPlayout::Render AudioPlayout::render(std::int64_t now,std::int64_t audible,
         }
     }
     if(stats_.queued){
-        const auto& last=blocks_[(head_+stats_.queued-1)%capacity];
+        const auto& last=blocks_[(head_+stats_.queued-1)%capacity_];
         const auto knownEnd=last.deadlineUs+10000;
         if(knownEnd>audible&&knownEnd<audible+sampleUs(frames)){
             // Do not commit synthetic silence over the next timely capture

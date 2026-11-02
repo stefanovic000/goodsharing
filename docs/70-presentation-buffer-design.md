@@ -255,3 +255,42 @@ So 150 ms is now close - video and audio both flow, nothing storms on the good
 run - but its audio needs 4.8 s to start and it still storms on repeat. 300 ms
 still livelocks. The shipped profiles therefore stay at 45/55 ms, where the full
 matrix and the native suite are green.
+### Third attempt: the large buffers work (2026-11-02)
+
+Three fixed-size assumptions, not one, kept the buffers from ever committing. All
+are now derived from the profile:
+
+- `AudioPlayout` rejected any block whose deadline was more than **100 ms**
+  ahead (`deadline>now+100000`). A 300 ms buffer makes every block exactly that
+  far ahead, so nothing was ever admitted and the timeline reset on every frame.
+  The limit is now `max(100 ms, lead+40 ms)`.
+- `projectVideo` accepted a projection only 10-80 ms ahead, so no ticket could
+  validate past an 80 ms lead. It now uses the configured ticket lead.
+- The PCM queue was `std::array<Block,6>` - 60 ms - while the buffer needs the
+  whole presentation delay. Depth is now `6 + buffer/10 ms` blocks (capped at
+  40) with heap storage, because 40 blocks inline overflowed test stacks.
+
+The ticket lead limit and the wait bound are now the same value, which is what the
+`deadline == received + leadLimit` equality in `validLocked` assumes. The
+harness gates became durations as this document's plan required: queue depth is
+`high_water * frameMs <= lead + wait + 2 frames`, PCM depth is
+`blocks * 10 ms <= lead + 60 ms`, and the lead/wait gates read the values the run
+reports.
+
+Full 8-case matrix at the *shipped* profiles, which are now Low 45 / Balanced 150 /
+Smooth 300 ms:
+
+| Case | Result | drawn | audio blocks | first audio | max lead | queue |
+| --- | --- | --- | --- | --- | --- | --- |
+| 720/30 | pass | 509/515 | 890 | 72 ms | 156 | 6 |
+| 1080/30 | pass | 507/515 | 1173 | 80 ms | 150 | 6 |
+| low/30 | pass | 509/515 | 889 | 21 ms | 74 | 3 |
+| smooth/30 | pass | 509/519 | 1187 | 230 ms | 302 | 10 |
+| 720/60 | pass | 1001/1035 | 1188 | 80 ms | 153 | 11 |
+| 1080/60 | pass | 1006/1040 | 1190 | 79 ms | 157 | 11 |
+| low/60 | pass | 1025/1034 | 1190 | 32 ms | 73 | 5 |
+| smooth/60 | pass | 1006/1036 | 1175 | 239 | 313 | 20 |
+
+Resets are 2-3 in every cell and the native suite is 23/23. The trade the profiles
+make is now visible in the numbers: first audio rises from 21 ms (Low) to 230-239 ms
+(Smooth), which is the presentation delay being paid for jitter tolerance.

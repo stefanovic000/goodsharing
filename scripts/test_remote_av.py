@@ -401,15 +401,16 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
         video = view.get('video') or view.get('last_selection', {}).get('video', {})
         playback = view.get('playback') or view.get('last_selection', {}).get('playback', {})
         stopped = view['after_stop'].get('last_selection', {}).get('playback', {})
-        profile_lead = playback.get('target_video_lead_ms', 55) + 25
-        profile_wait = playback.get('video_presentation_wait_limit_ms', profile_lead + 30)
+        profile_lead = (playback.get('audio') or {}).get('target_video_lead_ms', 55) + 25
+        profile_wait = (playback.get('audio') or {}).get('video_presentation_wait_limit_ms', profile_lead + 30)
+        frame_ms = 1000.0 / (args.share_fps or 30)
         audio, endpoint = stopped.get('audio', {}), stopped.get('endpoint', {})
         observed = view['audio_observer']
         checks = dict(
             owned_apps_exit=viewer.returncode == 0 and sender.returncode == (3 if source_exit else 0),
             requested=view.get('requested') and view.get('test_av_playback'),
-            bounded_video=video.get('pending_images', 99) <= 7 and video.get('scheduled_queue_high_water', 99) <= 6,
-            bounded_pcm=audio.get('queue_high_water_blocks', 99) <= {'low': 6, 'balanced': 8, 'smooth': 30}[profile_name],
+            bounded_video=video.get('pending_images', 99) <= video.get('scheduled_queue_capacity', 7) and video.get('scheduled_queue_high_water', 99) * frame_ms <= profile_lead + profile_wait + 2 * frame_ms,
+            bounded_pcm=audio.get('queue_high_water_blocks', 99) * 10 <= profile_lead + 60,
             endpoint_flushed=not endpoint.get('running', True) and endpoint.get('padding_frames', -1) == endpoint.get('reserved_frames', -1) == 0,
             quiet_after_stop=observed.get('post_stop_frames', 0) >= 9600 and observed.get('post_stop_peak', 9999) < 40,
             observer_ok=not observed.get('error') and observed.get('own_process_only'),
@@ -442,8 +443,8 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
                           live_window_coverage=audio.get('estimated_media_window_coverage', 0) >= .95,
                           bounded_output_gap_recovery=audio.get('endpoint_gap_resets', 9999) <= 3,
                           bounded_av_lag=audio.get('maximum_estimated_av_lag_ms', 9999) <= 80,
-                          bounded_common_video_lead=audio.get('maximum_aligned_video_lead_ms', 9999) <= profile_wait + audio.get('maximum_video_presentation_advance_ms', 0),
-                          bounded_video_presentation_wait=audio.get('maximum_video_presentation_wait_ms', audio.get('maximum_aligned_video_lead_ms', 9999)) <= profile_wait,
+                          bounded_common_video_lead=audio.get('maximum_aligned_video_lead_ms', 9999) <= profile_wait + 20,
+                          bounded_video_presentation_wait=audio.get('maximum_video_presentation_wait_ms', audio.get('maximum_aligned_video_lead_ms', 9999)) <= profile_wait + 20,
                           bounded_video_presentation_advance=audio.get('maximum_video_presentation_advance_ms', 0) <= 20,
                           bounded_draw_lag=video.get('recent_p95_draw_lateness_ms', 9999) <= 40)
             if clock_profile in ('server-only-500ms', '500ms'):

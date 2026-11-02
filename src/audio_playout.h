@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <span>
 #include <optional>
+#include <memory>
+#include <vector>
 
 namespace goodsharing {
 // Metadata only: RTCP sender NTP is not encryption/presentation permission.
@@ -20,13 +22,13 @@ struct PlayoutClock {
 // Local timestamps are receiver steady-clock microseconds; senderUs is separate.
 class AudioPlayout {
 public:
-    static constexpr std::size_t blockFrames=480,channels=2,capacity=6;
+    static constexpr std::size_t blockFrames=480,channels=2,capacity=6,maximumBlocks=40;
     static constexpr std::int64_t maximumResidenceUs=60000,videoLifetimeUs=150000;
     static constexpr std::int64_t pcmWaitGuardUs=4000;
     static constexpr std::int64_t maximumCadenceCorrectionUs=20000;
     static constexpr std::int64_t maximumPresentationLeadUs=80000,maximumVideoAdvanceUs=20000;
     struct Stats {
-        std::uint64_t admitted=0,unclocked=0,invalid=0,lateInput=0,overflowBlocks=0,
+        std::uint64_t admitted=0,unclocked=0,unclockedVideo=0,unclockedAudio=0,invalid=0,lateInput=0,overflowBlocks=0,
             expiredBlocks=0,lateFrames=0,renderedFrames=0,silentFrames=0,resets=0;
         std::size_t queued=0,highWater=0;
         bool anchored=false,closed=false,resetPending=true;
@@ -75,6 +77,7 @@ public:
     // How long a decoded block may wait for its deadline. Follows the buffer so a
     // larger presentation delay cannot expire its own backlog (docs/70 step 3).
     std::int64_t configuredResidenceUs()const{return residenceUs_;}
+    std::size_t configuredCapacityBlocks()const{return capacity_;}
     std::int64_t configuredVideoLifetimeUs()const{return videoLifetimeValueUs_;}
     std::int64_t configuredPresentationLeadLimitUs()const{return presentationLeadLimitUs_;}
     // Only after a successful final-permission device commit containing media.
@@ -94,7 +97,10 @@ public:
     std::optional<std::int64_t> frontDeadline()const{if(!stats_.anchored||!stats_.queued)return {};const auto& b=blocks_[head_];return b.deadlineUs+static_cast<std::int64_t>(b.used)*1000000/48000;}
 private:
     struct Block {std::array<std::int16_t,blockFrames*channels> pcm{};std::int64_t senderUs=0,receivedUs=0,deadlineUs=0,sourceDurationUs=10000;std::size_t used=0;};
-    std::array<Block,capacity> blocks_{};
+    std::size_t capacity_=capacity; // runtime depth: must cover the presentation buffer
+    // Heap storage: 40 blocks inline made every AudioPlayout ~77 KB and overflowed
+    // test stacks. Sized once; capacity_ decides how many are usable.
+    std::vector<Block> blocks_=std::vector<Block>(maximumBlocks);
     Stats stats_;
     std::size_t head_=0;
     PlayoutClock lastVideo_,lastAudio_;

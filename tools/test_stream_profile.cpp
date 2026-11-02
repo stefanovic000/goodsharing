@@ -15,8 +15,8 @@ struct Expected {StreamProfile profile;const char* name;std::int64_t lead,wait,c
 // with; the refactor must not move them.
 const Expected expected[]={
     {StreamProfile::LowLatency,"low",45000,80000,120000},
-    {StreamProfile::Balanced,"balanced",55000,90000,150000},
-    {StreamProfile::Smooth,"smooth",55000,110000,250000},
+    {StreamProfile::Balanced,"balanced",150000,200000,150000},
+    {StreamProfile::Smooth,"smooth",300000,350000,250000},
 };
 bool check(bool condition,const char* what) {
     if(condition)return true;
