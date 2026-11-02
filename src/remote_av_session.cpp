@@ -91,7 +91,7 @@ void RemoteAvSession::run(std::stop_token stop,std::shared_ptr<RemoteShare> audi
             video.reset();
             {std::lock_guard lock(mutex_);if(!closed_&&bound){playout_=&output;playoutAtomic_.store(&output,std::memory_order_release);}}
             auto nextReport=std::chrono::steady_clock::now();
-        std::uint64_t lastAdmittedAudio=0,lastPresentedVideo=0;auto lastAudioProgress=std::chrono::steady_clock::now();int starvationRestarts=0;
+        std::uint64_t lastAdmittedAudio=0,lastPresentedVideo=0;auto lastAudioProgress=std::chrono::steady_clock::now();int starvationRestarts=0;const auto sessionStart=std::chrono::steady_clock::now();
             bool audioRestartSent=false;
             while(bound&&!stop.stop_requested()){
                 std::uint64_t observed=0;{std::lock_guard lock(mutex_);observed=sequence_;}
@@ -107,7 +107,10 @@ void RemoteAvSession::run(std::stop_token stop,std::shared_ptr<RemoteShare> audi
              const auto presented=static_cast<std::uint64_t>(audioStats["presented_video_frames"].toDouble());
              const auto now=std::chrono::steady_clock::now();
              if(admitted!=lastAdmittedAudio){lastAdmittedAudio=admitted;lastAudioProgress=now;}
-             else if(starvationRestarts<2&&presented>100&&admitted>0&&now-lastAudioProgress>std::chrono::milliseconds(750)){
+             const auto sessionAge=std::chrono::duration_cast<std::chrono::milliseconds>(now-sessionStart).count();
+             const bool neverStarted=admitted==0&&presented>100&&sessionAge>2500;
+             const bool stopped=admitted>0&&now-lastAudioProgress>std::chrono::milliseconds(750);
+             if(starvationRestarts<2&&presented>100&&(neverStarted||stopped)){
                  ++starvationRestarts;lastAudioProgress=now;std::function<void()> callback;
                  {std::lock_guard lock(mutex_);callback=audioRestart_;audioStarvationRestarts_=++starvationRestarts;}
                  if(callback)callback();}}

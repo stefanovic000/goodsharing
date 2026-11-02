@@ -146,3 +146,20 @@ run. At 150 ms the same case over five runs produced one hold in five (worst 160
 instead of nine in fifteen (worst 184 ms), with A/V lag unchanged at 29.8 ms and every
 run passing. The picture now holds for at most about one and a half frames beyond the
 detection threshold rather than two.
+
+### The two stall shapes
+
+A broken suite run finally showed the shape of the failure: the audio reader was open
+and running (`ended = false`, `reader_running = true`), the watch reported ready with
+no error, and yet no block ever reached the playout. That is a *startup* stall, and the
+first watchdog could not see it because it required `admitted > 0`.
+
+The watchdog now distinguishes the two:
+
+- **never started**: no block admitted, more than 100 pictures presented and 2.5 s of
+  session age - the subscription is set up but nothing is arriving;
+- **stopped**: audio had started and then nothing for 750 ms.
+
+Both resubscribe, at most twice per session, and report through
+`audio_starvation_restarts`. Verified: a session whose audio is dropped from the first
+frame now reports `audio_retry_attempts = 1`; a healthy run reports 0.
