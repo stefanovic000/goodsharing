@@ -147,7 +147,27 @@ is a test left behind by an intentional behaviour change:
   produces.
 
 The last two are diagnosed only as far as their failing assertion; neither has been
-traced to a specific code change yet.
+traced to a specific code change yet. Recording them here is bookkeeping, not a gate:
+the acceptance path for this design is the A/V matrix under "Tests before it may be
+called done", not the unit suite.
 
-Restoring the suite is a prerequisite for the step 4 matrix, and each of these is a
-test-versus-code decision rather than a mechanical fix.
+## Observed failure (2026-11-02)
+
+The 720p case at the current 55 ms lead is intermittent, and the failures are not
+near misses — they are reset storms:
+
+| Run | Result | drawn / admitted | audio blocks admitted | first audio | resets |
+| --- | --- | --- | --- | --- | --- |
+| `20261102-032345` | fail | 162 / 519 | 0 | — | 715 |
+| `20261102-032443` | pass | 527 / 531 | 1190 | 15.2 ms | 3 |
+
+Six consecutive 720p runs that night gave pass, fail, fail, fail, fail, pass; three
+fresh runs on the step-1 build gave three passes. A run either settles (3 resets, all
+media flowing) or never converges (hundreds of resets, no audio block ever admitted),
+which is the shape this document's model is meant to remove: each reset flushes video
+as well as audio, so the two validate each other into a livelock once the lead has no
+valid position relative to the last painted picture.
+
+Acceptance numbers for the model change, taken from the passing run: roughly 3
+resets, ~527 drawn of ~531 admitted, over 1000 admitted audio blocks and a first
+audible block near 15 ms — repeated across runs, not a single green one.
