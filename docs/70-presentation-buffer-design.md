@@ -338,3 +338,39 @@ is the open piece of the loss case.
 
 Next levers, in order: FEC/retransmission for erasure, then a non-blocking jitter
 impairment to demonstrate the buffer's actual benefit.
+## Jitter case: the buffer does buy tolerance (2026-11-02)
+
+The jitter impairment is `--delay-ms N`: each arriving audio block is queued and
+released N ms late by a worker thread (`GOODSHARING_TEST_DELAY_MS`). Sleeping in
+the ingress callback instead kills the viewer, because it blocks the SDK callback
+thread; and enabling the delay from the first frame perturbs *startup*, which is
+what the first attempt measured — non-monotonic results. It now engages only after a
+3 s warm-up, so the measurement is steady state.
+
+The `painted` gate needed tightening for this: it asked for `timed_draws > 100`,
+but a halted presentation still produced ~110 timed pictures before the impairment
+engaged, so a broken run passed. It now requires >200, and every normal case
+(350 at 30 fps, 676 at 60, 559 minimized) clears it comfortably.
+
+720p, 30 fps, same build, timed pictures out of ~350:
+
+| Delayed arrival | Low 45 ms | Balanced 150 ms | Smooth 300 ms |
+| --- | --- | --- | --- |
+| 60 ms | **fail**, 19 | pass, 350 | pass, 346 |
+| 120 ms | **fail**, 111 | **fail**, 108 | pass, 346 |
+| 200 ms | **fail**, 114 | **fail**, 20 | pass, 346 |
+
+The threshold tracks the buffer: Low fails from 60 ms (its buffer is 45), Balanced
+survives 60 but not 120, Smooth still passes at 200 and failed at 250 in the earlier
+run. That is the trade the profiles exist for, finally visible: the buffer buys
+tolerated lateness roughly proportional to its size, and costs first-audio delay of
+the same order.
+
+Note what does *not* move: media coverage stays at 0.999 and admitted audio blocks
+stay in the 800-1180 range in every cell, including failures. The runs fail because
+timed presentation stops, not because audio is lost - the audio path re-anchors and
+keeps playing while the picture timeline stalls.
+
+With that, the loss and jitter cases in "Tests before it may be called done" both
+exist, and they say opposite things: jitter scales with the buffer, erasure does not
+scale with anything available here and needs FEC.

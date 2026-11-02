@@ -222,7 +222,7 @@ def check_quality_switch(view, case):
     return checks
 
 
-def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None, duration_ms=None, clock_profile='upstream', server_debug=False, disable_presentation_floor=False, disable_audio_retry=False, server=None, loss_percent=0.0):
+def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None, duration_ms=None, clock_profile='upstream', server_debug=False, disable_presentation_floor=False, disable_audio_retry=False, server=None, loss_percent=0.0, delay_ms=0):
     folder.mkdir(parents=True)
     fixture = None if server else LocalMediaFixture(folder / 'server')
     children, logs, profiles = [], [], []
@@ -258,6 +258,10 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
             # playout, which is what packet loss looks like to the scheduler.
             env['GOODSHARING_TEST_DROP'] = str(loss_percent)
             result['impairment'] = {'drop_percent': loss_percent}
+        if delay_ms:
+            # Lateness rather than erasure: a buffer larger than this absorbs it.
+            env['GOODSHARING_TEST_DELAY_MS'] = str(delay_ms)
+            result['impairment'] = dict(result.get('impairment') or {}, delay_ms=delay_ms)
         env['QML_IMPORT_PATH'] = str(ROOT / '.deps/qt/6.8.3/msvc2022_64/qml')
         env.pop('GOODSHARING_TEST_AV_TRACE', None)
         env.pop('GOODSHARING_TEST_RTCP_REPORT_MS', None)
@@ -445,7 +449,7 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
                           quiet_whole_run=observed.get('whole_run_peak', 9999) < 40,
                           no_pixels=video.get('drawn_distinct_frames', 0) == 0 and not view['composited_marker_valid'])
         else:
-            checks.update(painted=video.get('timed_draws', 0) > 100,
+            checks.update(painted=video.get('timed_draws', 0) > 200,
                           frame_queue_observed=video.get('wait_for_frame_queue') and video.get('queued_presentations', 0) > 100,
                           heard_audio=observed.get('whole_run_peak', 0) > 100 and audio.get('committed_media_frames', 0) > 48000,
                           media_filled_device_frames=audio.get('committed_media_frames', 0) / max(1, endpoint.get('submitted_frames_including_silence', 0)) >= profile_fill,
@@ -575,6 +579,7 @@ def main():
     parser.add_argument('--server-debug', action='store_true', help='Record owned SFU transport diagnostics for connection failures')
     parser.add_argument('--disable-presentation-floor', action='store_true', help='Test-only A/B control; allow catch-up frames less than 10 ms apart')
     parser.add_argument('--loss', type=float, default=0.0, help='Drop this percent of arriving frames before the playout')
+    parser.add_argument('--delay-ms', type=int, default=0, help='Release each arriving audio block this many ms late (jitter impairment)')
     parser.add_argument('--disable-audio-retry', action='store_true', help='Test-only control; disable bounded stereo resubscription')
     parser.add_argument('--app-exe', type=Path, help='Explicit archived project app for a same-PC regression control; default is the current build')
     parser.add_argument('--watch-duration-ms', type=int, help='Longer owned local observation, 18000-58000 ms; default depends on case')
@@ -588,7 +593,7 @@ def main():
     rows = []
     selected = cases if args.case == 'all' else [c for c in cases if c.startswith('static')] if args.case == 'static-all' else [c for c in cases if c.startswith('switch')] if args.case == 'switch-all' else [args.case]
     for case in selected:
-        row = run_case(folder / case, case, args.trace_timing, args.visible_view, args.app_exe, args.watch_duration_ms, args.clock_profile, args.server_debug, args.disable_presentation_floor, args.disable_audio_retry, remote_server(args), loss_percent=args.loss); rows.append(row)
+        row = run_case(folder / case, case, args.trace_timing, args.visible_view, args.app_exe, args.watch_duration_ms, args.clock_profile, args.server_debug, args.disable_presentation_floor, args.disable_audio_retry, remote_server(args), loss_percent=args.loss, delay_ms=args.delay_ms); rows.append(row)
         print(json.dumps(dict(case=case, passed=row['passed'], error=row.get('error'),
                              failed_checks=[k for k, v in row.get('checks', {}).items() if not v])), flush=True)
     summary = dict(passed=all(row['passed'] for row in rows), runs=rows)

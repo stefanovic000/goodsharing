@@ -23,7 +23,27 @@ bool dropArrival(){
 template<class T> PlayoutClock stamp(const T& event){return {event.sender_ntp_us.value_or(0),event.rtp_timestamp.value_or(0),event.sender_clock_epoch.value_or(0),event.rtcp_reports.value_or(0),event.rtp_timestamp.has_value()};}
 }
 RemoteAudioPlayout::RemoteAudioPlayout(AudioPlayoutSink& sink,LocalClock clock,std::shared_ptr<RemoteMediaSelection> selection):sink_(sink),clock_(clock?std::move(clock):LocalClock{localNow}),selection_(selection?std::move(selection):std::make_shared<RemoteMediaSelection>()){}
-RemoteAudioPlayout::~RemoteAudioPlayout(){stop();}
+void RemoteAudioPlayout::jitterStart(){
+    if(jitterThread_.joinable()||jitterDelayUs_<=0)return;
+    jitterThread_=std::thread([this]{jitterLoop();});
+}
+void RemoteAudioPlayout::jitterLoop(){
+    std::unique_lock lock(jitterMutex_);
+    while(true){
+        if(jitterStop_&&jitterQueue_.empty())break;
+        if(jitterQueue_.empty()){jitterCv_.wait_for(lock,std::chrono::milliseconds(5));continue;}
+        const auto nowUs=std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        if(jitterQueue_.front().dueUs>nowUs){jitterCv_.wait_for(lock,std::chrono::microseconds(jitterQueue_.front().dueUs-nowUs));continue;}
+        auto item=std::move(jitterQueue_.front());jitterQueue_.pop_front();lock.unlock();
+        audio(item.clock,std::span<const std::int16_t>(item.pcm));
+        lock.lock();
+    }
+}
+void RemoteAudioPlayout::jitterShutdown(){
+    {std::lock_guard lock(jitterMutex_);jitterStop_=true;}
+    jitterCv_.notify_all();
+    if(jitterThread_.joinable())jitterThread_.join();
+}RemoteAudioPlayout::~RemoteAudioPlayout(){stop();}
 RemoteAudioPlayout::ResetTrace RemoteAudioPlayout::resetContext(int kind,PlayoutClock clock,std::int64_t now,const std::shared_ptr<RemoteShare>& video)const{
     if(!traceEnabled_)return {};
     const auto stats=core_.stats();
@@ -263,6 +283,25 @@ bool RemoteAudioPlayout::presentedLocked(PresentationTicket ticket){
 }
 bool RemoteAudioPlayout::audio(livekit::AudioFrameEvent& frame){
     if(dropArrival())return false;
+    // Jitter impairment: queue the block and let the worker release it late, so the
+    // scheduler sees late input rather than a blocked SDK callback thread.
+    // Engage only after warm-up so the measurement is steady-state jitter rather
+    // than a different startup, which is what a first attempt actually perturbed.
+    static const std::int64_t delayStartUs=[](){
+        const char* v=std::getenv("GOODSHARING_TEST_DELAY_WARMUP_MS");
+        return v?static_cast<std::int64_t>(std::atol(v))*1000:3000000; }();
+    static const std::int64_t firstArrivalUs=std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    const auto arrivalUs=std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    if(const char* delayMs=std::getenv("GOODSHARING_TEST_DELAY_MS");delayMs&&std::atoi(delayMs)>0&&arrivalUs-firstArrivalUs>delayStartUs){
+        if(frame.frame.sampleRate()!=48000||frame.frame.numChannels()!=2||frame.frame.samplesPerChannel()!=480)return audio({},{});
+        jitterDelayUs_=static_cast<std::int64_t>(std::atol(delayMs))*1000;jitterStart();
+        const auto dueUs=std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()+jitterDelayUs_;
+        std::vector<std::int16_t> pcm(frame.frame.data()); // SDK exposes the samples as a vector
+        {std::lock_guard lock(jitterMutex_);jitterQueue_.push_back({stamp(frame),std::move(pcm),dueUs});}
+        jitterCv_.notify_one();
+        return true;
+    }
+    if(dropArrival())return false;
     if(frame.frame.sampleRate()!=48000||frame.frame.numChannels()!=2||frame.frame.samplesPerChannel()!=480)return audio({},{});
     return audio(stamp(frame),frame.frame.data());
 }
@@ -410,7 +449,7 @@ void RemoteAudioPlayout::setVolume(float volume){
     std::lock_guard lock(mutex_);volume_=volume;
 }
 void RemoteAudioPlayout::setMuted(bool muted){std::lock_guard lock(mutex_);if(muted_!=muted){muted_=muted;core_.resetTiming();}}
-void RemoteAudioPlayout::stop(){std::lock_guard lock(mutex_);if(stopped_)return;stopped_=closed_=true;selection_->stop();core_.revoke();sink_.cancel();flush();}
+void RemoteAudioPlayout::stop(){jitterShutdown();std::lock_guard lock(mutex_);if(stopped_)return;stopped_=closed_=true;selection_->stop();core_.revoke();sink_.cancel();flush();}
 QJsonObject RemoteAudioPlayout::report(bool includeTestHistory)const{
     std::lock_guard lock(mutex_);const auto s=core_.stats();
     const auto reportNow=clock_();const auto frontDeadline=core_.frontDeadline();const auto tailDeadline=core_.audioDeadline();

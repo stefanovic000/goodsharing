@@ -5,6 +5,10 @@
 #include "presentation_ticket.h"
 #include "remote_media_selection.h"
 #include <optional>
+#include <vector>
+#include <thread>
+#include <condition_variable>
+#include <deque>
 
 namespace goodsharing {
 // One sink and audio watch for life. A split selection may replace video only.
@@ -91,7 +95,19 @@ private:
     std::int64_t bufferUs_=0;
     std::int64_t videoWaitLimitUs_=80000; // profile wait bound; age gates follow it
     std::optional<std::int64_t> delayedSender(std::int64_t now)const;
-    void logGap(const char* reason,std::int64_t detailMs=0);
+    // Test-only jitter impairment (GOODSHARING_TEST_DELAY_MS): arriving audio is
+    // queued and released after that delay by this worker instead of being slept
+    // on in the SDK callback, which blocks its thread and kills the viewer.
+    struct JitterFrame {PlayoutClock clock;std::vector<std::int16_t> pcm;std::int64_t dueUs=0;};
+    std::mutex jitterMutex_;
+    std::condition_variable jitterCv_;
+    std::deque<JitterFrame> jitterQueue_;
+    std::thread jitterThread_;
+    bool jitterStop_=false;
+    std::int64_t jitterDelayUs_=0;
+    void jitterStart();
+    void jitterLoop();
+    void jitterShutdown();    void logGap(const char* reason,std::int64_t detailMs=0);
     std::function<void(const QString&)> logger_;
     std::int64_t lastGapLogUs_=0;
     std::int64_t startedWallUs_=0,firstAudibleWallUs_=0;
