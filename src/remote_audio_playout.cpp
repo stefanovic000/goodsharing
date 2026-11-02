@@ -15,7 +15,15 @@ namespace {
 // arriving frames never reaches the playout, which is what network loss looks
 // like to the scheduler. Off unless the variable is set.
 bool dropArrival(){
-    static const int percent=[](){const char* v=std::getenv("GOODSHARING_TEST_DROP");return v?std::atoi(v):0;}();
+    // Optional mid-run stall: GOODSHARING_TEST_DROP_AFTER_MS makes the drop only
+    // start after that many ms, which is what a delivery stall looks like.
+    static const int stallAfterMs=[](){const char* v=std::getenv("GOODSHARING_TEST_DROP_AFTER_MS");return v?std::atoi(v):0;}();
+    if(stallAfterMs>0){static const auto start=std::chrono::steady_clock::now();
+        const auto elapsed=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-start).count();
+        if(elapsed<stallAfterMs)return false;}
+    static const int percent=[](){
+        const char* audio=std::getenv("GOODSHARING_TEST_AUDIO_DROP");if(audio)return std::atoi(audio);
+        const char* all=std::getenv("GOODSHARING_TEST_DROP");return all?std::atoi(all):0;}();
     if(percent<=0)return false;
     static thread_local std::mt19937 rng{std::random_device{}()};
     return std::uniform_int_distribution<int>(1,100)(rng)<=percent;

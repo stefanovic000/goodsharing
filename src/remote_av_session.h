@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "remote_video.h"
 #include "remote_audio_playout.h"
 #include <atomic>
@@ -41,6 +41,9 @@ private:
     const std::uint64_t sessionId_;
     unsigned workerStarts_=0;
     std::int64_t leadUs_=30000,videoWaitLimitUs_=80000;
+    // Delivery watchdog: how many times audio had to be resubscribed because it
+    // stopped arriving while the picture kept coming. Reported every snapshot.
+    int audioStarvationRestarts_=0;
     float gain_=1.0f;
     bool started_=false,closed_=false;
     std::uint64_t sequence_=0;

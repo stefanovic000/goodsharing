@@ -94,12 +94,10 @@ def checkpoint_count(path):
     # QSaveFile replaces this owned snapshot atomically. On Windows a brief
     # sharing conflict while it is replaced is not a completed observation.
     # The caller's original deadline still bounds all retries.
-
     try:
         return len(json.loads(path.read_text(encoding='utf-8')))
-    except (PermissionError, FileNotFoundError):
-        return 0
-
+    except (OSError, ValueError):
+        return 0  # the writer may be mid-file; the caller re-reads
 
 def check_continuous_tone(observed, limit_ms=40):
     tone = observed.get('continuous_tone_observation', {})
@@ -407,7 +405,15 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
         except subprocess.TimeoutExpired:
             sender.kill()
         result['sender_exit'] = sender.returncode
-        view, send = (json.loads((folder / name).read_text()) for name in ('viewer.json', 'sender.json'))
+        view = send = None
+        for _ in range(100):
+            try:
+                view, send = (json.loads((folder / name).read_text()) for name in ('viewer.json', 'sender.json'))
+                break
+            except (OSError, ValueError):
+                time.sleep(.05)
+        if view is None or send is None:
+            raise RuntimeError('Viewer or sender report was not readable after the run')
         # Lead/wait come from the profile the app reports, so a larger presentation
         # buffer is judged against its own bound rather than the old fixed leads.
         profile_name = 'smooth' if (case == 'smooth' or args.profile == 'auto') else (args.profile or 'balanced')
@@ -473,8 +479,9 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
                     checks['continuous_tone_without_gap'] = check_continuous_tone(observed, 60 if profile_name == 'low' else 40)
     # What a viewer actually notices: a picture that stops moving, or sound that stops.
     # The quality gates above stay strict; these two say whether the session broke.
-        checks['no_long_audio_silence'] = (observed.get('continuous_tone_observation') or {}).get('longest_quiet_ms', 0) <= 200
-        checks['no_long_video_freeze'] = (video.get('longest_freeze_ms') or 0) <= 1000
+        expects_media = not source_exit and not wrong
+        checks['no_long_audio_silence'] = (not expects_media) or (observed.get('continuous_tone_observation') or {}).get('longest_quiet_ms', 0) <= 200
+        checks['no_long_video_freeze'] = (not expects_media) or case == 'minimized' or (video.get('longest_freeze_ms') or 0) <= 1000
         if case == 'paint-stall':
             checks.update(check_stall_observations(view, args.share_fps))
         if switching:

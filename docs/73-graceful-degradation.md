@@ -75,3 +75,35 @@ a 150 or 300 ms buffer can, and Low is meant to try rather than fail.
 ``freeze_count``, ``longest_freeze_ms``, ``total_frozen_ms`` and
 ``late_presentations`` are in the video report, next to the residence percentiles, so
 a run says how much the picture actually moved and whether the app had to degrade.
+## The remaining anomaly: a rare three-second silence
+
+In roughly twenty 720p runs at 30 fps, one produced a 3.08 s audio silence with
+`estimated_media_window_coverage` 0.65 while every other run measured 0.999-1.000.
+The signature:
+
+- the sender admitted 1933 audio blocks (19.3 s) and reported no error;
+- the viewer admitted 584 blocks (5.8 s), then nothing;
+- its audio watch reported `ready`, not stopped, with an empty `reader_error`;
+- six timeline resets, zero endpoint gap resets, and an empty `viewer.log`.
+
+So audio simply stopped being delivered to the playout while the track still looked
+healthy - the same shape as the decoded-delivery failures in docs/56, not a scheduling
+problem this document addresses. It did not reproduce in twenty subsequent runs.
+
+### Mitigation added, and what is proven
+
+`RemoteAvSession` now watches audio delivery: if no block has been admitted for
+750 ms while more than 100 pictures have been presented and audio had started, it calls
+the existing bounded audio-resubscription callback (at most twice) and reports
+`audio_starvation_restarts` in the playback report.
+
+Proven: the watchdog does **not** fire in healthy runs (0 restarts across 720p,
+1080p, static, minimized, switch-timeout and source-exit cases after the change), and
+the whole suite still passes.
+
+Not proven: that it recovers from the real failure. Provoking a mid-run stall needs a
+drop that starts partway through, `GOODSHARING_TEST_AUDIO_DROP` with
+`GOODSHARING_TEST_DROP_AFTER_MS`; the run that used it lost audio entirely and left
+the report showing the post-restart session, so the counter could not confirm the
+restart. The next attempt should trace SDK audio callbacks with timestamps rather than
+infer from counters, and should capture the failure live the next time it occurs.

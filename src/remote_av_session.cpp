@@ -1,4 +1,4 @@
-#include "remote_av_session.h"
+﻿#include "remote_av_session.h"
 #include "wasapi_playout_sink.h"
 #include <windows.h>
 #include <objbase.h>
@@ -82,7 +82,7 @@ void RemoteAvSession::run(std::stop_token stop,std::shared_ptr<RemoteShare> audi
             const auto began=std::chrono::steady_clock::now();const auto a=output.report(history),endpoint=sink.report();
             const auto elapsed=std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now()-began).count();
             std::lock_guard lock(mutex_);if(!history)maximumLiveSnapshotUs_=std::max(maximumLiveSnapshotUs_,elapsed);
-            last_={{"audio",a},{"endpoint",endpoint},{"audio_task_registered",true}};return a;
+            last_={{"audio",a},{"endpoint",endpoint},{"audio_task_registered",true},{"audio_starvation_restarts",audioStarvationRestarts_}};return a;
         };
         try{
             bool bound=false;
@@ -91,6 +91,7 @@ void RemoteAvSession::run(std::stop_token stop,std::shared_ptr<RemoteShare> audi
             video.reset();
             {std::lock_guard lock(mutex_);if(!closed_&&bound){playout_=&output;playoutAtomic_.store(&output,std::memory_order_release);}}
             auto nextReport=std::chrono::steady_clock::now();
+        std::uint64_t lastAdmittedAudio=0,lastPresentedVideo=0;auto lastAudioProgress=std::chrono::steady_clock::now();int starvationRestarts=0;
             bool audioRestartSent=false;
             while(bound&&!stop.stop_requested()){
                 std::uint64_t observed=0;{std::lock_guard lock(mutex_);observed=sequence_;}
@@ -98,6 +99,18 @@ void RemoteAvSession::run(std::stop_token stop,std::shared_ptr<RemoteShare> audi
                 if(pumped==RemoteAudioPlayout::Pump::Failed||pumped==RemoteAudioPlayout::Pump::Closed){audio->revoke();break;}
                 if(std::chrono::steady_clock::now()>=nextReport){
                     const auto audioStats=snapshot();
+            // Delivery watchdog: audio can stop arriving while the track still reports
+            // ready and error-free, which leaves the viewer silently mute. If no block
+            // has been admitted for 750 ms while pictures are still being presented, ask
+            // for a fresh subscription instead of staying silent.
+            {const auto admitted=static_cast<std::uint64_t>(audioStats["admitted_audio_blocks"].toDouble());
+             const auto presented=static_cast<std::uint64_t>(audioStats["presented_video_frames"].toDouble());
+             const auto now=std::chrono::steady_clock::now();
+             if(admitted!=lastAdmittedAudio){lastAdmittedAudio=admitted;lastAudioProgress=now;}
+             else if(starvationRestarts<2&&presented>100&&admitted>0&&now-lastAudioProgress>std::chrono::milliseconds(750)){
+                 ++starvationRestarts;lastAudioProgress=now;std::function<void()> callback;
+                 {std::lock_guard lock(mutex_);callback=audioRestart_;audioStarvationRestarts_=++starvationRestarts;}
+                 if(callback)callback();}}
                     if(!audioRestartSent&&audioStats["committed_media_frames"].toDouble()>=48000&&
                        audioStats["decoded_channel_difference_ratio"].toDouble()==0){
                         audioRestartSent=true;std::function<void()> callback;
