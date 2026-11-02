@@ -14,7 +14,7 @@ struct Expected {StreamProfile profile;const char* name;std::int64_t lead,wait,c
 // Leads 45/55/55 and waits 80/90/110 ms are the values each profile was tuned
 // with; the refactor must not move them.
 const Expected expected[]={
-    {StreamProfile::LowLatency,"low",45000,80000,120000},
+    {StreamProfile::LowLatency,"low",70000,105000,120000},
     {StreamProfile::Balanced,"balanced",150000,200000,150000},
     {StreamProfile::Smooth,"smooth",300000,350000,250000},
 };
@@ -61,5 +61,5 @@ int main() {
     for(const char* rejected: {static_cast<const char*>(nullptr),"fast",""}) {
         try { parseStreamProfile(rejected); return 6; } catch(const std::invalid_argument&) {}
     }
-    std::cout<<"Stream profiles carry one buffer and headroom; derived leads 45/55/55 and waits 80/90/110 ms are accepted by the playout core\n";
+    std::cout<<"Stream profiles carry one buffer and headroom; derived leads 70/150/300 and waits 105/200/350 ms are accepted by the playout core\n";
 }

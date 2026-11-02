@@ -36,10 +36,10 @@ inline StreamTiming streamTiming(StreamProfile profile) {
     const char* overrideUs=std::getenv("GOODSHARING_TEST_BUFFER_US");
     StreamTiming timing;
     switch(profile) {
-    // buffer + headroom are 45+35 = 80, 55+35 = 90 and 55+55 = 110 ms. The 150 and
+    // buffer + headroom are 70+35 = 105, 150+50 = 200 and 300+50 = 350 ms. The 150 and
     // 300 ms values in docs/70 are deliberately not shipped: measured 2026-11-02
     // they bring back the reset storm (711-1429 resets, no audio admitted).
-    case StreamProfile::LowLatency: timing={45000,35000,4000,120000};break;
+    case StreamProfile::LowLatency: timing={70000,35000,4000,120000};break;
     case StreamProfile::Smooth: timing={300000,50000,4000,250000};break;
     case StreamProfile::Balanced: timing={150000,50000,4000,150000};break;
     }

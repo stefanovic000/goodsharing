@@ -12,7 +12,7 @@ between sessions.
 
 | Profile | Presentation buffer | Video wait bound | Presentation floor | Sender capture age |
 | --- | ---: | ---: | ---: | ---: |
-| Low latency | 45 ms | 80 ms | 4 ms | 120 ms |
+| Low latency | 70 ms | 105 ms | 4 ms | 120 ms |
 | Balanced (default) | 150 ms | 200 ms | 4 ms | 150 ms |
 | Smooth | 300 ms | 350 ms | 4 ms | 250 ms |
 

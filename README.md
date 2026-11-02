@@ -12,7 +12,7 @@ Discord and OBS are either closed-source, require an account, or are built for s
 
 - **Share** a window or a display, with audio off / one application / desktop audio
 - **Watch** at 720p or 1080p, click a person to switch to their screen while still sharing your own
-- **Three latency profiles**: Low latency (45 ms buffer), Balanced (150 ms), Smooth (300 ms)
+- **Three latency profiles**: Low latency (70 ms buffer), Balanced (150 ms), Smooth (300 ms)
 - **30 or 60 fps**, hardware CBR encoding, two published tracks (1080p + 720p)
 - **E2EE** — one shared 64-hex key; a wrong key yields no picture, verified by test
 - **People panel** — per-person volume slider, stop watching, live "sharing" state

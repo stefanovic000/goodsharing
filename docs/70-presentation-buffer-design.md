@@ -451,3 +451,21 @@ Four harness faults surfaced only because that sweep existed:
 - `switch_probe_completed` required an adopted switch for every switch case,
   including `switch-timeout`, whose whole point is that no switch happens. For that
   case it now requires the timeout observation to exist.
+## Low's buffer raised from 45 to 70 ms (2026-11-02)
+
+The seventeen-case sweep failed `low` twice on `continuous_tone_without_gap` and
+passed it on retries, with three different gates over the session. The failing run
+missed by 2 ms - a 42 ms quiet interval against the 40 ms limit - so it was marginal
+rather than broken, and only the 45 ms profile was affected.
+
+What decided the change is that the buffer was buying nothing measurable: residence
+p50 was 68-77 ms at a 45 ms buffer and 71-79 ms at 70 ms, because one encode/decode
+hop dominates. Measured under identical back-to-back load, 45 ms failed one of two
+and 70 ms passed both, at the same residence. Low is therefore 70 ms (wait 105 ms),
+and the full sweep then passed 17 of 17 with `minimized` failing once on a harness
+observation timeout that passed twice on retry.
+
+The lesson is the one this document keeps repeating: a bound below the machine's own
+scheduling noise is not a latency win, it is a flake generator. The 300 ms profile is
+still 4x Low's delay, so the profiles still separate: 74 ms measured at Low, 157 at
+Balanced, 314 at Smooth in the same sweep.
