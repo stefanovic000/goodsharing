@@ -163,3 +163,18 @@ The watchdog now distinguishes the two:
 Both resubscribe, at most twice per session, and report through
 `audio_starvation_restarts`. Verified: a session whose audio is dropped from the first
 frame now reports `audio_retry_attempts = 1`; a healthy run reports 0.
+
+## Open: the occasional start-up run that produces nothing
+
+Two full-suite runs out of five ended with one case that produced no media at all. The
+signature differs from the silence above: the viewer exits cleanly (code 0) with an
+empty `viewer.log` and a report that never acquired a playback section, while the
+sender exits with code 3 - the code it uses when its shared window goes away. Both apps
+gave up immediately rather than degrading, and no check could describe why.
+
+It has not been reproduced in isolation (twenty repeats of the same case were clean),
+and it appears only inside a long suite run, which points at start-up resource or
+window ownership rather than the media path. The next step is to capture the sender's
+first log lines and the fixture's window handle for the failing attempt, and to make
+the harness report "never started" distinctly from "started and degraded" instead of
+marking a dozen media checks failed.
