@@ -115,17 +115,21 @@ the common clock already places one lead after capture. Three consequences:
 - `GOODSHARING_TEST_OLD_TIMELINE=1` sets the buffer to 0 and restores the pre-model
   source, so one binary can A/B both paths.
 
-Measured on the 720p case, three runs each, same binary:
+Measured on the 720p case, same binary, delayed arm extended to seven runs:
 
 | Path | Result | drawn | audio blocks | resets |
 | --- | --- | --- | --- | --- |
-| delayed timeline | 3/3 pass | 514–525 of 518–528 | 1173–1189 | 2–3 |
-| old timeline | 1/3 fail (`.03` gaps/tone coverage) | 511–515 of 515–519 | 1169–1186 | 2–3 |
+| delayed timeline | 7/7 pass | 507–525 of 512–528 | 888–1189 | 2–3 |
+| old timeline | 1/3 fail (tone gaps / coverage) | 511–515 of 515–519 | 1169–1186 | 2–3 |
+
+No delayed run reset more than three times, against 715 in the storm run. Two of the
+seven admitted fewer audio blocks (888, 889) while still passing every gate, so the
+delayed path is not uniform yet — worth watching in the step 4 matrix rather than
+declaring the model finished.
 
 The old path's failure this time was a tone gap rather than a reset storm, so its
-weakness is intermittent in more than one way. Three runs per arm is thin evidence;
-step 4's repeated matrix is what should decide, and the earlier storm numbers
-(715 resets) remain the thing to reproduce against.
+weakness is intermittent in more than one way, and three runs per arm is thin
+evidence. Step 4's repeated matrix is what should decide.
 
 Step 1 is done. `StreamTiming` now holds `bufferUs` and `headroomUs` and derives
 `leadUs()` and `videoWaitLimitUs()` from them; nothing reads an independently
