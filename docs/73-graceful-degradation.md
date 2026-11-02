@@ -52,7 +52,8 @@ liveness wins. Measured effect at 720p/30 fps and 720p/60 fps:
 | --- | ---: | ---: | ---: |
 | 60 ms | 0 ms | 4 | 29.6 ms |
 | 150 ms | 159 ms | 1-2 | 29.8 ms |
-| 200 ms (default) | 167-207 ms | 0-1 | 29.7 ms |
+| 200 ms | 167-207 ms | 0-1 | 29.7 ms |
+| 150 ms (default) | 160 ms | 0-1 | 29.8 ms |
 | 250 ms | 176-255 ms | 0-1 | 29.2 ms |
 | 500 ms (first attempt) | 320 ms | 0 | - |
 
@@ -137,3 +138,11 @@ additions make the next one diagnosable:
 A healthy run reports `ended = false, reader_running = true`. If the silence recurs,
 the report will say whether the stream had ended (transport/subscription) or was still
 open with nothing arriving (decoded delivery).
+
+### Grace lowered to 150 ms
+
+With the catch-up at 200 ms a hold of 168-184 ms still slipped underneath it, once per
+run. At 150 ms the same case over five runs produced one hold in five (worst 160 ms)
+instead of nine in fifteen (worst 184 ms), with A/V lag unchanged at 29.8 ms and every
+run passing. The picture now holds for at most about one and a half frames beyond the
+detection threshold rather than two.

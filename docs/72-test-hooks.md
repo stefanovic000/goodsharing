@@ -51,3 +51,13 @@ set in normal operation, and the app behaves identically when they are absent.
    the two places.
 4. **Report the disturbance in the summary** (`impairment`, `net_impairment`) so a
    run can never be mistaken for a clean one.
+
+## Runner flags worth knowing
+
+--repeat N runs each selected case N times and prints an aggregate line per case
+(runs, passes, worst audio quiet, minimum coverage, total holds, worst hold). It is
+the cheap way to separate a real regression from a flake: a single green run says
+little on a PC that also runs the capture path.
+
+--case all runs every case in one artifact, which is how the 17/17 result in
+docs/73 was produced; --case static-all and --case switch-all narrow that.

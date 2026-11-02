@@ -417,7 +417,10 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
             raise RuntimeError('Viewer or sender report was not readable after the run')
         # Lead/wait come from the profile the app reports, so a larger presentation
         # buffer is judged against its own bound rather than the old fixed leads.
-        profile_name = 'smooth' if (case == 'smooth' or args.profile == 'auto') else (args.profile or 'balanced')
+        # The profile the app actually runs: the case name pins low/smooth, otherwise
+        # the --profile flag; "auto" means the saved setting, which defaults to balanced.
+        app_profile = {'low': 'low', 'smooth': 'smooth'}.get(case) or args.profile
+        profile_name = 'balanced' if app_profile in (None, 'auto') else app_profile
         profile_fill = .90 if case == 'smooth' else .95
         video = view.get('video') or view.get('last_selection', {}).get('video', {})
         playback = view.get('playback') or view.get('last_selection', {}).get('playback', {})
@@ -597,6 +600,7 @@ def main():
     parser.add_argument('--disable-audio-retry', action='store_true', help='Test-only control; disable bounded stereo resubscription')
     parser.add_argument('--app-exe', type=Path, help='Explicit archived project app for a same-PC regression control; default is the current build')
     parser.add_argument('--watch-duration-ms', type=int, help='Longer owned local observation, 18000-58000 ms; default depends on case')
+    parser.add_argument('--repeat', type=int, default=1, help='Run each selected case this many times and report a pass rate with worst-case metrics')
     parser.add_argument('--clock-profile', choices=['upstream', 'same-server-default', 'server-only-500ms', '500ms'], default='upstream',
                         help='Explicit local report-cadence comparison; all non-upstream profiles use the identical verified SFU build; server-only-500ms keeps client reporting unchanged')
     global args
@@ -604,12 +608,38 @@ def main():
     if args.watch_duration_ms is not None and not 18000 <= args.watch_duration_ms <= 58000:
         parser.error('--watch-duration-ms must be between 18000 and 58000')
     folder = ROOT / 'artifacts' / (time.strftime('%Y%m%d-%H%M%S') + '-remote-av'); folder.mkdir(parents=True)
+    def case_metrics(row):
+        viewer = row.get('viewer') or {}
+        tone = (viewer.get('audio_observer') or {}).get('continuous_tone_observation') or {}
+        video = viewer.get('video') or (viewer.get('last_selection') or {}).get('video') or {}
+        audio = (viewer.get('playback') or {}).get('audio') or {}
+        return dict(quiet_ms=tone.get('longest_quiet_ms'), coverage=audio.get('estimated_media_window_coverage'),
+                    holds=video.get('freeze_count'), worst_hold_ms=video.get('longest_freeze_ms'))
+
     rows = []
     selected = cases if args.case == 'all' else [c for c in cases if c.startswith('static')] if args.case == 'static-all' else [c for c in cases if c.startswith('switch')] if args.case == 'switch-all' else [args.case]
+    aggregates = []
+    repeats = max(1, args.repeat)
     for case in selected:
-        row = run_case(folder / case, case, args.trace_timing, args.visible_view, args.app_exe, args.watch_duration_ms, args.clock_profile, args.server_debug, args.disable_presentation_floor, args.disable_audio_retry, remote_server(args), loss_percent=args.loss, delay_ms=args.delay_ms); rows.append(row)
-        print(json.dumps(dict(case=case, passed=row['passed'], error=row.get('error'),
-                             failed_checks=[k for k, v in row.get('checks', {}).items() if not v])), flush=True)
+        attempts = []
+        for attempt in range(repeats):
+            name = case if repeats == 1 else f'{case}-{attempt + 1}'
+            row = run_case(folder / name, case, args.trace_timing, args.visible_view, args.app_exe, args.watch_duration_ms, args.clock_profile,
+                           args.server_debug, args.disable_presentation_floor, args.disable_audio_retry, remote_server(args),
+                           loss_percent=args.loss, delay_ms=args.delay_ms)
+            attempts.append(row)
+            print(json.dumps(dict(case=case, attempt=attempt + 1, passed=row['passed'], error=row.get('error'),
+                                 failed_checks=[k for k, v in row.get('checks', {}).items() if not v])), flush=True)
+        rows.extend(attempts)
+        if repeats > 1:
+            metrics = [case_metrics(row) for row in attempts]
+            aggregates.append(dict(case=case, runs=len(attempts), passes=sum(1 for row in attempts if row['passed']),
+                                   worst_quiet_ms=max((m['quiet_ms'] or 0) for m in metrics),
+                                   minimum_coverage=min((m['coverage'] if m['coverage'] is not None else 0) for m in metrics),
+                                   total_holds=sum((m['holds'] or 0) for m in metrics),
+                                   worst_hold_ms=max((m['worst_hold_ms'] or 0) for m in metrics)))
+    for aggregate in aggregates:
+        print(json.dumps(aggregate), flush=True)
     summary = dict(passed=all(row['passed'] for row in rows), runs=rows)
     (folder / 'summary.json').write_text(json.dumps(summary, indent=2))
     print('Reports: ' + str(folder), flush=True)

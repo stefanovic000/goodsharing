@@ -175,7 +175,7 @@ bool RemoteVideo::changed() {
         // Degrade rather than freeze: once the picture has held for half a second the
         // A/V sync this drop policy protects is already lost, so present the newest
         // pending picture late instead of leaving a still frame on screen.
-        static const std::int64_t freezeGraceUs=[](const char* v){return v?static_cast<std::int64_t>(std::atol(v))*1000:200000;} (std::getenv("GOODSHARING_TEST_FREEZE_GRACE_MS"));
+        static const std::int64_t freezeGraceUs=[](const char* v){return v?static_cast<std::int64_t>(std::atol(v))*1000:150000;} (std::getenv("GOODSHARING_TEST_FREEZE_GRACE_MS"));
         if(pendingCount_&&lastPresentationUs_&&now-lastPresentationUs_>freezeGraceUs&&watch&&admit(watch,[]{})){
             auto& next=pending_[pendingHead_];
             if(next.untimed||timing_.valid(next.ticket)){
