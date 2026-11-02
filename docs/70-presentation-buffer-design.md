@@ -101,6 +101,32 @@ painted sender time. This is the core change; everything else follows from it.
 
 ## Progress
 
+Step 2 is done. `RemoteAudioPlayout::pump` no longer measures audio against the
+last painted picture. When a buffer is configured, the reference is the delayed
+timeline — `senderAt(now)`, the sender position that should be audible now, which
+the common clock already places one lead after capture. Three consequences:
+
+- The A/V horizon, the trimmed commit margin, the render `SourceWindow` and the
+  lag reset all use that reference instead of `presentedSender_`.
+- A presented ticket is no longer required before audio may start, and the
+  last-paint age reset only applies once something has actually been painted. This
+  is the deadlock in the table above: with no picture ever presented the reference
+  stayed at 0, every block was "ahead of the picture", and nothing was admitted.
+- `GOODSHARING_TEST_OLD_TIMELINE=1` sets the buffer to 0 and restores the pre-model
+  source, so one binary can A/B both paths.
+
+Measured on the 720p case, three runs each, same binary:
+
+| Path | Result | drawn | audio blocks | resets |
+| --- | --- | --- | --- | --- |
+| delayed timeline | 3/3 pass | 514–525 of 518–528 | 1173–1189 | 2–3 |
+| old timeline | 1/3 fail (`.03` gaps/tone coverage) | 511–515 of 515–519 | 1169–1186 | 2–3 |
+
+The old path's failure this time was a tone gap rather than a reset storm, so its
+weakness is intermittent in more than one way. Three runs per arm is thin evidence;
+step 4's repeated matrix is what should decide, and the earlier storm numbers
+(715 resets) remain the thing to reproduce against.
+
 Step 1 is done. `StreamTiming` now holds `bufferUs` and `headroomUs` and derives
 `leadUs()` and `videoWaitLimitUs()` from them; nothing reads an independently
 tuned lead any more, and `preview_backend` passes the derived pair to the playout

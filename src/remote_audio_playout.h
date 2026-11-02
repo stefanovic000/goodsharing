@@ -84,6 +84,12 @@ private:
     std::int64_t firstMediaAudibleUs_=0,lastMediaEndUs_=0;
     std::int64_t anchorWaitStartUs_=0,audioStartedWithoutVideo_=0;
     std::int64_t horizonUs_=80000;
+    // Delayed timeline (docs/70 step 2): the presentation delay D in microseconds,
+    // 0 meaning the pre-model behaviour of measuring against the last painted
+    // picture. The common clock already anchors sender time D after capture, so
+    // senderAt(now) is the sender position that should be audible at now.
+    std::int64_t bufferUs_=0;
+    std::optional<std::int64_t> delayedSender(std::int64_t now)const;
     void logGap(const char* reason,std::int64_t detailMs=0);
     std::function<void(const QString&)> logger_;
     std::int64_t lastGapLogUs_=0;

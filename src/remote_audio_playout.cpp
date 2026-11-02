@@ -1,4 +1,4 @@
-﻿#include "remote_audio_playout.h"
+#include "remote_audio_playout.h"
 #include "frame_metadata_codec.h"
 #include <chrono>
 #include <cmath>
@@ -201,6 +201,14 @@ void RemoteAudioPlayout::configureTiming(std::int64_t leadUs,std::int64_t videoW
     horizonUs_=std::max<std::int64_t>(80000,leadUs+40000);
     if(bound_)throw std::logic_error("Playout timing must precede binding");
     core_.configureTiming(leadUs,videoWaitLimitUs);
+    // The lead is the presentation delay (stream_profile.h derives one from the
+    // other), so it doubles as the delayed-timeline buffer. The test hook keeps
+    // the old source for an A/B control on the same binary.
+    bufferUs_=qEnvironmentVariableIntValue("GOODSHARING_TEST_OLD_TIMELINE")?0:leadUs;
+}
+std::optional<std::int64_t> RemoteAudioPlayout::delayedSender(std::int64_t now)const{
+    if(!bufferUs_)return {};
+    return core_.senderAt(now);
 }
 void RemoteAudioPlayout::requirePresentation(){std::lock_guard lock(mutex_);if(bound_)throw std::logic_error("Presentation mode must precede binding");presentationRequired_=true;core_.enableAudioAlignment();}
 void RemoteAudioPlayout::enableAudioContinuity(){std::lock_guard lock(mutex_);if(bound_)throw std::logic_error("Audio continuity must precede binding");audioContinuity_=true;core_.enableAudioContinuity();}
@@ -260,9 +268,14 @@ RemoteAudioPlayout::Pump RemoteAudioPlayout::pump(){
     if(!core_.stats().anchored)return Pump::Waiting;
     if(presentationRequired_&&!core_.stats().alignmentLocked&&!core_.stats().queued){presentationWaits_++;return Pump::Waiting;}
     const bool audioContinuity=presentationRequired_&&audioContinuity_&&presentedFrames_>0;
+    // Delayed timeline: the audible sender position exists as soon as the common
+    // clock is anchored, so neither a first-picture ticket nor the age of the last
+    // paint gates the session. Each flush used to reset video as well and the two
+    // then validated each other into the reset storm recorded in docs/70.
+    const auto delayed=delayedSender(clock_());
     if(presentationRequired_){
-        if(presentedSerial_!=core_.stats().resetSerial&&!audioContinuity){presentationWaits_++;return Pump::Waiting;}
-        if(!audioContinuity&&clock_()-presentedLocal_>80000){auto event=resetContext(5,core_.lastVideoClock(),clock_(),split_?selection_->selected():watch);
+        if(presentedSerial_!=core_.stats().resetSerial&&!audioContinuity&&!delayed){presentationWaits_++;return Pump::Waiting;}
+        if(!audioContinuity&&presentedLocal_&&clock_()-presentedLocal_>80000){auto event=resetContext(5,core_.lastVideoClock(),clock_(),split_?selection_->selected():watch);
             core_.resetTiming();rememberReset(std::move(event));presentationResets_++;presentationAgeResets_++;if(!flush())return Pump::Failed;return Pump::Reset;}
     }
     // Reserve outside the watch lock. A revoke during preparation must win
@@ -292,15 +305,18 @@ RemoteAudioPlayout::Pump RemoteAudioPlayout::pump(){
     if(!window){sink_.cancel();return Pump::Waiting;}
     if(!window->frames||window->frames>AudioPlayout::blockFrames){sink_.cancel();return fail();}
     auto permittedFrames=window->frames;
+    // What should be audible now: the delayed timeline when it exists, otherwise
+    // the last painted picture as before.
+    const auto reference=delayed.value_or(presentedSender_);
     if(presentationRequired_&&!audioContinuity){
         // Validate the endpoint timestamp before adding the bounded packet
         // duration, including when a faulty sink returns an extreme value.
         auto source=core_.senderAt(window->firstAudibleUs);
         if(source)*source+=static_cast<std::int64_t>(window->frames-1)*1000000/48000;
-        if(!source||*source-presentedSender_ < -horizonUs_){
+        if(!source||*source-reference < -horizonUs_){
             sink_.cancel();core_.resetTiming();presentationResets_++;presentationLagResets_++;if(!flush())return Pump::Failed;return Pump::Reset;
         }
-        if(*source-presentedSender_>horizonUs_){
+        if(*source-reference>horizonUs_){
             // Before the first picture is presented there is no anchor to wait for,
             // and waiting on one silenced the start of every share. Give video a
             // short head start, then let audio run on its own clock.
@@ -313,9 +329,9 @@ RemoteAudioPlayout::Pump RemoteAudioPlayout::pump(){
                 audioStartedWithoutVideo_++;
             }else{
                 const auto first=core_.senderAt(window->firstAudibleUs);
-                if(!first||*first-presentedSender_>horizonUs_){sink_.cancel();presentationLeadWaits_++;logGap("waiting for video lead");return Pump::Waiting;}
+                if(!first||*first-reference>horizonUs_){sink_.cancel();presentationLeadWaits_++;logGap("waiting for video lead");return Pump::Waiting;}
                 // Commit only samples already within the unchanged A/V horizon.
-                const auto margin=presentedSender_+horizonUs_-*first;
+                const auto margin=reference+horizonUs_-*first;
                 permittedFrames=std::min(permittedFrames,static_cast<std::size_t>(margin*48000/1000000+1));
             }
         }else anchorWaitStartUs_=0;
@@ -329,7 +345,7 @@ RemoteAudioPlayout::Pump RemoteAudioPlayout::pump(){
         rendering.outputPast=window->firstAudibleUs<renderNow;
         rendering.outputOverlaps=rendering.previousOutputEnd&&window->firstAudibleUs<rendering.previousOutputEnd-1000;}
     const auto rendered=core_.render(renderNow,window->firstAudibleUs,output,presentationRequired_&&!audioContinuity?
-        std::optional<AudioPlayout::SourceWindow>{{presentedSender_-horizonUs_,presentedSender_+horizonUs_}}:std::nullopt);
+        std::optional<AudioPlayout::SourceWindow>{{reference-horizonUs_,reference+horizonUs_}}:std::nullopt);
     if(traceEnabled_)rememberReset(std::move(rendering));
     trace({3,renderNow,0,window->firstAudibleUs,front,queued,rendered.mediaFrames,rendered.outputFrames});
     if(rendered.sourceLeadWait)presentationLeadWaits_++;
@@ -351,8 +367,8 @@ RemoteAudioPlayout::Pump RemoteAudioPlayout::pump(){
     if(presentationRequired_&&!audioContinuity){
         const auto source=rendered.mediaFrames?std::optional{rendered.lastSourceUs}:
             core_.senderAt(window->firstAudibleUs+static_cast<std::int64_t>(rendered.outputFrames-1)*1000000/48000);
-        avLag=source?*source-presentedSender_:INT64_MAX;
-        const auto firstLag=rendered.mediaFrames?rendered.firstSourceUs-presentedSender_:avLag;
+        avLag=source?*source-reference:INT64_MAX;
+        const auto firstLag=rendered.mediaFrames?rendered.firstSourceUs-reference:avLag;
         if(firstLag < -horizonUs_||firstLag>horizonUs_||avLag < -horizonUs_||avLag>horizonUs_){sink_.cancel();core_.resetTiming();presentationResets_++;presentationLagResets_++;if(!flush())return Pump::Failed;return Pump::Reset;}
         if(std::abs(firstLag)>std::abs(avLag))avLag=firstLag;
     }
