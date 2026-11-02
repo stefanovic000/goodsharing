@@ -34,6 +34,8 @@ The SFU speaks plain `ws://`; a `wss://` attempt fails inside the SDK with
 | Smooth | 300 ms | pass | 441/451 | 814 | 2 | 279.0 ms |
 | Smooth | 300 ms | pass | 433/444 | 813 | 2 | 302.6 ms |
 | Smooth | 300 ms | pass | 455/465 | 820 | 2 | 304.4 ms |
+| Balanced 1080p | 150 ms | pass | 456/462 | 817 | 2 | 151.0 ms |
+| Smooth 60 fps | 300 ms | pass | 891/922 | 821 | 2 | 308.8 ms |
 
 Low's failure is the one already understood from the jitter case: the picture
 timeline never settles, so presentation falls back to arrival pacing (residence
