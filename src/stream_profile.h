@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <cstdint>
 #include <stdexcept>
 #include <string_view>
@@ -31,7 +31,7 @@ struct StreamTiming {
 
 inline StreamTiming streamTiming(StreamProfile profile) {
     switch(profile) {
-    // buffer + headroom are 45+35 = 80, 55+35 = 90 and 55+55 = 110 ms.
+    // buffer + headroom are 45+35 = 80, 55+35 = 90 and 55+55 = 110 ms. The 150 and`n    // 300 ms values in docs/70 are deliberately not shipped: measured 2026-11-02 they`n    // bring back the reset storm (711-1429 resets, no audio admitted).
     case StreamProfile::LowLatency: return {45000,35000,4000,120000};
     case StreamProfile::Smooth: return {55000,55000,4000,250000};
     case StreamProfile::Balanced: break;

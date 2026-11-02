@@ -13,13 +13,15 @@ std::int64_t ticks(std::uint32_t now,std::uint32_t before) {
 std::int64_t sampleUs(std::size_t frames){return static_cast<std::int64_t>(frames)*1000000/48000;}
 }
 void AudioPlayout::configureTiming(std::int64_t leadUs,std::int64_t videoWaitLimitUs,std::int64_t bufferUs) {
-    if(leadUs<5000||leadUs>200000||videoWaitLimitUs<20000||videoWaitLimitUs>300000||bufferUs<0||bufferUs>200000)
+    if(leadUs<5000||leadUs>600000||videoWaitLimitUs<20000||videoWaitLimitUs>700000||bufferUs<0||bufferUs>600000)
         throw std::invalid_argument("Invalid playout timing");
     leadUs_=leadUs;videoWaitLimitUs_=videoWaitLimitUs;
     // A block must survive long enough to reach a deadline one buffer away, plus a
     // 15 ms margin. The 60 ms constant stays the floor, so the shipped 45 ms profile
     // keeps its tuned residence and only larger buffers widen it.
     residenceUs_=std::max(maximumResidenceUs,bufferUs+15000);
+    videoLifetimeValueUs_=std::max(videoLifetimeUs,bufferUs+50000);
+    presentationLeadLimitUs_=std::max(maximumPresentationLeadUs,bufferUs+25000);
 }
 bool PlayoutClock::valid()const{return hasRtp&&senderUs>0&&senderUs<=5000000000000000ll&&epoch>0&&reports>=2;}
 void AudioPlayout::resetDevice(){stats_.resetPending=true;if(++stats_.resetSerial==0)++stats_.resetSerial;stats_.resets++;lastOutputEnd_=0;}
@@ -40,7 +42,7 @@ bool AudioPlayout::video(PlayoutClock clock,std::int64_t now,bool allowBoundedAd
     const auto delta=clock.senderUs-anchorSender_;
     const auto projected=anchorLocal_+delta;
     if(alignAudio_&&stats_.anchored&&clock.epoch==lastVideo_.epoch&&delta>=-2000000&&delta<=2000000&&
-       now-lastVideoLocal_<=videoLifetimeUs&&projected-now>videoWaitLimitUs_&&projected-now<=videoWaitLimitUs_+20000){
+       now-lastVideoLocal_<=videoLifetimeValueUs_&&projected-now>videoWaitLimitUs_&&projected-now<=videoWaitLimitUs_+20000){
         if(allowBoundedAdvance&&stats_.alignmentLocked&&!stats_.resetPending){
             // Running video can be presented at the existing 80 ms wait bound,
             // up to 20 ms before its common-clock target. Keep source stamps,
@@ -82,15 +84,15 @@ bool AudioPlayout::video(PlayoutClock clock,std::int64_t now,bool allowBoundedAd
 }
 std::optional<std::int64_t> AudioPlayout::projectVideo(PlayoutClock clock,std::int64_t received)const{
     if(stats_.closed||!stats_.anchored||stats_.resetPending||!stats_.alignmentLocked||!clock.valid()||
-       received<=0||received>maximumLocalUs||received<lastNow_||received-lastVideoLocal_>videoLifetimeUs)return {};
+       received<=0||received>maximumLocalUs||received<lastNow_||received-lastVideoLocal_>videoLifetimeValueUs_)return {};
     const auto deadline=localFor(clock.senderUs);
     if(!deadline||*deadline-received<10000||*deadline-received>80000)return {};
     return deadline;
 }
 bool AudioPlayout::adoptVideo(PlayoutClock clock,std::int64_t received,std::int64_t now,std::int64_t deadline,std::uint64_t serial){
     if(stats_.closed||!stats_.anchored||stats_.resetPending||!stats_.alignmentLocked||serial!=stats_.resetSerial||!clock.valid()||
-       received<=0||now<received||now>maximumLocalUs||now<lastNow_||now-received>videoLifetimeUs||
-       now-lastVideoLocal_>videoLifetimeUs||localFor(clock.senderUs)!=deadline||now<deadline||now-deadline>videoWaitLimitUs_)return false;
+       received<=0||now<received||now>maximumLocalUs||now<lastNow_||now-received>videoLifetimeValueUs_||
+       now-lastVideoLocal_>videoLifetimeValueUs_||localFor(clock.senderUs)!=deadline||now<deadline||now-deadline>videoWaitLimitUs_)return false;
     // This is a different video SSRC: its epoch is independent of the retired
     // track. Preserve the common clock, audio ordering, queued PCM and device.
     lastVideo_=clock;lastVideoLocal_=received;lastNow_=now;return true;
@@ -99,7 +101,7 @@ bool AudioPlayout::audio(PlayoutClock clock,std::span<const std::int16_t> pcm,st
     if(stats_.closed||!localTime(now))return false;
     if(!clock.valid()){
         stats_.unclocked++;
-        if(alignAudio_&&!stats_.alignmentLocked&&stats_.anchored&&now-lastVideoLocal_<=videoLifetimeUs){
+        if(alignAudio_&&!stats_.alignmentLocked&&stats_.anchored&&now-lastVideoLocal_<=videoLifetimeValueUs_){
             // Audio and video may train at different times. Missing startup
             // audio reports cannot invalidate an independently valid video
             // clock. Reject all such PCM and wait for trained audio instead.
@@ -111,7 +113,7 @@ bool AudioPlayout::audio(PlayoutClock clock,std::span<const std::int16_t> pcm,st
     if(clock.epoch<lastAudio_.epoch||(clock.epoch==lastAudio_.epoch&&
         (clock.senderUs<=lastAudio_.senderUs||ticks(clock.rtp,lastAudio_.rtp)<=0))){stats_.invalid++;return false;}
     if(lastAudio_.epoch&&clock.epoch!=lastAudio_.epoch){lastAudio_=clock;invalidate();return false;}
-    if(!stats_.anchored||(!audioContinuity_&&now-lastVideoLocal_>videoLifetimeUs)){invalidate();return false;}
+    if(!stats_.anchored||(!audioContinuity_&&now-lastVideoLocal_>videoLifetimeValueUs_)){invalidate();return false;}
     auto delta=clock.senderUs-anchorSender_;
     // Audio continuation: when video is stalled (or the shared source is
     // minimized) only video() used to advance the common origin, so a still-
@@ -249,7 +251,7 @@ AudioPlayout::Render AudioPlayout::render(std::int64_t now,std::int64_t audible,
     if(output.empty()||output.size()%channels||output.size()>blockFrames*channels||audible<now||audible>now+30000||
        (sourceWindow&&(sourceWindow->minimum<=0||sourceWindow->maximum<sourceWindow->minimum))||
        (lastOutputEnd_&&audible<lastOutputEnd_-1000)){stats_.invalid++;invalidate();return result();}
-    if(stats_.anchored&&!audioContinuity_&&now-lastVideoLocal_>videoLifetimeUs)invalidate();
+    if(stats_.anchored&&!audioContinuity_&&now-lastVideoLocal_>videoLifetimeValueUs_)invalidate();
     if(stats_.resetPending||!stats_.anchored)return result();
     while(stats_.queued&&now-blocks_[head_].receivedUs>residenceUs_){pop();stats_.expiredBlocks++;}
     if(alignAudio_&&stats_.alignmentLocked&&audible-now>pcmWaitGuardUs){

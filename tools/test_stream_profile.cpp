@@ -1,4 +1,4 @@
-// docs/70-presentation-buffer-design.md step 1: the profile carries one buffer
+﻿// docs/70-presentation-buffer-design.md step 1: the profile carries one buffer
 // and one headroom, and the lead/wait the playout core consumes are derived from
 // them. This keeps the tuned numbers visible in one place and fails loudly if a
 // future buffer value outgrows the core's validation.
@@ -61,5 +61,5 @@ int main() {
     for(const char* rejected: {static_cast<const char*>(nullptr),"fast",""}) {
         try { parseStreamProfile(rejected); return 6; } catch(const std::invalid_argument&) {}
     }
-    std::cout<<"Stream profiles carry one buffer and headroom; derived leads 45/55/55 and waits 80/90/110 ms are unchanged and accepted by the playout core\n";
+    std::cout<<"Stream profiles carry one buffer and headroom; derived leads 45/55/55 and waits 80/90/110 ms are accepted by the playout core\n";
 }

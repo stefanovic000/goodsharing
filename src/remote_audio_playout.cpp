@@ -120,7 +120,7 @@ bool RemoteAudioPlayout::candidateValidLocked(const std::shared_ptr<RemoteShare>
     const auto now=clock_();
     return split_&&video&&selection_->candidate()==video&&ticket.attempt==candidateAttempt_&&validLocked(ticket.presentation)&&
         ticket.clock.valid()&&ticket.clock.senderUs==ticket.presentation.senderUs&&ticket.receivedUs>0&&
-        now>=ticket.receivedUs&&now-ticket.receivedUs<=AudioPlayout::videoLifetimeUs&&selection_->presentVideo(video,[]{});
+        now>=ticket.receivedUs&&now-ticket.receivedUs<=core_.configuredVideoLifetimeUs()&&selection_->presentVideo(video,[]{});
 }
 bool RemoteAudioPlayout::candidateValid(const std::shared_ptr<RemoteShare>& video,const CandidateTicket& ticket)const{
     std::lock_guard lock(mutex_);return candidateValidLocked(video,ticket);
@@ -223,8 +223,8 @@ bool RemoteAudioPlayout::validLocked(PresentationTicket ticket)const{
         ticket.candidateClock.valid()&&ticket.candidateClock.senderUs==ticket.senderUs&&
         ticket.candidateClock.epoch==core_.lastVideoClock().epoch&&
         core_.senderAt(ticket.timelineDeadlineUs)==ticket.senderUs&&
-        ticket.receivedUs>0&&now>=ticket.receivedUs&&now-ticket.receivedUs<=AudioPlayout::videoLifetimeUs&&
-        ticket.deadlineUs==ticket.receivedUs+AudioPlayout::maximumPresentationLeadUs&&
+        ticket.receivedUs>0&&now>=ticket.receivedUs&&now-ticket.receivedUs<=core_.configuredVideoLifetimeUs()&&
+        ticket.deadlineUs==ticket.receivedUs+core_.configuredPresentationLeadLimitUs()&&
         advance>0&&advance<=AudioPlayout::maximumVideoAdvanceUs;
 }
 bool RemoteAudioPlayout::ticketValid(PresentationTicket ticket)const{std::lock_guard lock(mutex_);return validLocked(ticket);}
@@ -296,7 +296,7 @@ RemoteAudioPlayout::Pump RemoteAudioPlayout::pump(){
         // it. Longer absence, invalid clocks and stale presentation still use
         // the full timeline fence above or below.
         const bool preserve=stats.anchored&&stats.alignmentLocked&&!stats.resetPending&&end>0&&
-            now-end>=-30000&&now-end<=30000&&now-core_.lastVideoArrival()<=AudioPlayout::videoLifetimeUs&&
+            now-end>=-30000&&now-end<=30000&&now-core_.lastVideoArrival()<=core_.configuredVideoLifetimeUs()&&
             now-presentedLocal_<=80000;
         if(preserve){endpointTimelinePreserved_++;event.deviceOnlyRecovery=true;}
         else core_.resetTiming();
@@ -465,7 +465,7 @@ QJsonObject RemoteAudioPlayout::report(bool includeTestHistory)const{
         {"maximum_allowed_low_headroom_audio_offset_ms",40},
         {"pcm_arrival_waits",static_cast<double>(s.pcmArrivalWaits)},{"pcm_wait_write_guard_us",static_cast<double>(AudioPlayout::pcmWaitGuardUs)},
         {"maximum_aligned_video_lead_ms",s.maximumAlignedVideoLeadUs/1000.0},{"common_clock_video_lead_limit_ms",80},
-        {"running_video_mapping_lead_limit_ms",(AudioPlayout::maximumPresentationLeadUs+AudioPlayout::maximumVideoAdvanceUs)/1000.0},
+        {"running_video_mapping_lead_limit_ms",(core_.configuredPresentationLeadLimitUs()+AudioPlayout::maximumVideoAdvanceUs)/1000.0},
         {"test_timing_trace",trace},
         {"test_reset_trace",resets},{"test_first_playback_fault",firstFault},{"test_history_included",includeTestHistory},
         {"recent_audio_deadline_lead_p05_ms",audioLeadCount_?leads[(audioLeadCount_-1)*5/100]/1000.0:0},

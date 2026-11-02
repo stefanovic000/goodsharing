@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <array>
 #include <atomic>
 #include <algorithm>
@@ -75,6 +75,8 @@ public:
     // How long a decoded block may wait for its deadline. Follows the buffer so a
     // larger presentation delay cannot expire its own backlog (docs/70 step 3).
     std::int64_t configuredResidenceUs()const{return residenceUs_;}
+    std::int64_t configuredVideoLifetimeUs()const{return videoLifetimeValueUs_;}
+    std::int64_t configuredPresentationLeadLimitUs()const{return presentationLeadLimitUs_;}
     // Only after a successful final-permission device commit containing media.
     void mediaCommitted(){if(alignAudio_&&stats_.anchored)stats_.alignmentLocked=true;}
     void revoke(); // terminal; a new watch requires a new object
@@ -103,6 +105,10 @@ private:
     bool alignAudio_=false;
     bool audioContinuity_=false;
     std::int64_t leadUs_=30000,videoWaitLimitUs_=80000;
+    // Both bounds are the shipped floors raised by the configured buffer: a picture
+    // cannot survive longer than the presentation delay, and a ticket cannot be
+    // trusted further ahead than that delay either.
+    std::int64_t videoLifetimeValueUs_=videoLifetimeUs,presentationLeadLimitUs_=maximumPresentationLeadUs;
     std::int64_t residenceUs_=maximumResidenceUs;
     float gain_=1.0f;
     unsigned consecutiveLate_=0;
