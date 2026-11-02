@@ -1,4 +1,4 @@
-﻿#include "remote_video.h"
+#include "remote_video.h"
 #include <algorithm>
 #include <QJsonArray>
 namespace goodsharing {
@@ -22,13 +22,20 @@ void RemoteVideo::setPresentationFloor(std::int64_t spacingUs){
     if(spacingUs<0||spacingUs>100000)throw std::invalid_argument("Invalid presentation floor");
     minimumPresentationSpacingUs_=spacingUs;
 }
-void RemoteVideo::setBuffer(std::int64_t bufferUs){
+void RemoteVideo::setBuffer(std::int64_t bufferUs,std::int64_t waitLimitUs){
     std::lock_guard lock(mutex_);
     if(bound_)throw std::logic_error("Presentation buffer must precede binding");
     if(bufferUs<0||bufferUs>500000)throw std::invalid_argument("Invalid presentation buffer");
     // A picture needs the buffer plus one 60 Hz frame and a little slack before it
     // can be called stale; smaller values expire buffered pictures on arrival.
     lifetime=std::max(nominalLifetime,std::chrono::milliseconds(bufferUs/1000+50000/1000));
+    // The queued span may cover the presentation delay plus one 60 Hz frame and a
+    // little slack, because that is the only time a picture legitimately waits: it
+    // arrives at most one buffer before its deadline. Sizing this from the wait
+    // bound instead let 60 FPS queue seven pictures, which is more than a 55 ms
+    // buffer can ever need. waitLimitUs is only checked for sanity.
+    if(waitLimitUs<0||waitLimitUs>500000)throw std::invalid_argument("Invalid presentation buffer");
+    windowUs_=std::max<std::int64_t>(50000,bufferUs+25000);
 }
 void RemoteVideo::setTiming(Timing timing){std::lock_guard lock(mutex_);if(bound_||!timing.schedule||!timing.valid||!timing.presented)throw std::logic_error("Invalid or late presentation timing binding");timing_=std::move(timing);}
 void RemoteVideo::setFrameReady(std::function<void()> callback){std::lock_guard lock(mutex_);if(bound_||!callback)throw std::logic_error("Invalid or late frame-ready binding");frameReady_=std::move(callback);}
@@ -107,6 +114,10 @@ void RemoteVideo::submit(livekit::VideoFrameEvent& event) {
         const auto sourceId=motionTraceEnabled_?sourceFrameId(event,width,height):0;
         bool notify=false;
         if(!admit(watch,[&]{
+            // Bound the queue by the span it covers, not by each frame's offset:
+            // the pictures already held are due sooner, so a newcomer beyond
+            // the window would stretch the whole queue past what can be painted.
+            if(!untimed&&pendingCount_&&ticket->deadlineUs-pending_[pendingHead_].ticket.deadlineUs>windowUs_){pendingDrops_++;return;}
             if(!untimed&&pendingCount_&&pending_[(pendingHead_+pendingCount_-1)%pending_.size()].ticket.serial!=ticket->serial)while(pendingCount_)popPending();
             if(pendingCount_==pending_.size()){
                 // Keep a picture available on the next display deadline. Drop

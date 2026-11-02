@@ -446,7 +446,7 @@ void PreviewBackend::beginWatch(Selection selection) {
         if(room_.hasShareQuality(selection.owner,selection.id,other))selection.quality=other;
     }
     auto frames=std::make_shared<goodsharing::RemoteVideo>();
-    frames->setPresentationFloor(timing().presentationFloorUs);frames->setBuffer(timing().bufferUs);
+    frames->setPresentationFloor(timing().presentationFloorUs);frames->setBuffer(timing().bufferUs,timing().videoWaitLimitUs());
     frames->setFrameReady([this,frames]{
         QMetaObject::invokeMethod(this,[this,frames]{
             if(remoteVideo_==frames&&remoteItem_&&!candidateDisplayed_)remoteItem_->update();
@@ -529,7 +529,7 @@ void PreviewBackend::stageQuality(Selection selection){
     const auto track=selection.quality==1080?goodsharing::ShareTrack::Video1080:goodsharing::ShareTrack::Video720;
     for(const auto& retiring:retiringTracks_)if(retiring->manifest().quality==track)return;
     auto frames=std::make_shared<goodsharing::RemoteVideo>();
-    frames->setPresentationFloor(timing().presentationFloorUs);frames->setBuffer(timing().bufferUs);frames->setWarming(true);
+    frames->setPresentationFloor(timing().presentationFloorUs);frames->setBuffer(timing().bufferUs,timing().videoWaitLimitUs());frames->setWarming(true);
     frames->setFrameReady([this,frames]{
         QMetaObject::invokeMethod(this,[this,frames]{
             if(candidateFrames_==frames&&candidateDisplayed_&&remoteItem_)remoteItem_->update();
@@ -652,7 +652,7 @@ bool PreviewBackend::beginExtra(Selection selection) {
     }
     const auto track=selection.quality==1080?goodsharing::ShareTrack::Video1080:goodsharing::ShareTrack::Video720;
     auto frames=std::make_shared<goodsharing::RemoteVideo>();
-    frames->setPresentationFloor(timing().presentationFloorUs);frames->setBuffer(timing().bufferUs);
+    frames->setPresentationFloor(timing().presentationFloorUs);frames->setBuffer(timing().bufferUs,timing().videoWaitLimitUs());
     const int slot=static_cast<int>(extras_.size());
     VideoItem* item=extraItems_[slot];
     // Same order as the main picture: the ready hook precedes binding.

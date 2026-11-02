@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "remote_share.h"
 #include "frame_metadata_codec.h"
 #include "presentation_ticket.h"
@@ -30,7 +30,7 @@ public:
     // Presentation delay this handoff must tolerate (docs/70 step 3): keeps the
     // 150 ms staleness budget as the floor and lets a larger buffer hold a picture
     // long enough to be painted instead of expiring it on arrival.
-    void setBuffer(std::int64_t bufferUs); // before bind
+    void setBuffer(std::int64_t bufferUs,std::int64_t waitLimitUs); // before bind
     void setFrameReady(std::function<void()> callback); // before bind; called off Qt
     void bind(const std::shared_ptr<RemoteShare>& watch);
     void submit(livekit::VideoFrameEvent& event);
@@ -100,6 +100,7 @@ private:
     bool admit(const std::shared_ptr<RemoteShare>& watch,const std::function<void()>& operation)const;
     static constexpr auto nominalLifetime=std::chrono::milliseconds(150);
     std::chrono::milliseconds lifetime=nominalLifetime; // setBuffer raises it with the buffer
+    std::int64_t windowUs_=130000; // presentation window the queued span may cover
     static constexpr std::int64_t nominalMinimumPresentationSpacingUs=10000;
     std::int64_t minimumPresentationSpacingUs_=qEnvironmentVariableIntValue("GOODSHARING_TEST_DISABLE_PRESENTATION_FLOOR")?0:nominalMinimumPresentationSpacingUs;
 };
