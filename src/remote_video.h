@@ -79,6 +79,9 @@ private:
     std::uint64_t submittedFrames_=0,untimedSerial_=0,lockWaitCount_=0,impairmentDrops_=0;
     std::function<void(const QString&)> logger_;
     bool frozenNotified_=false;
+    // User-visible freeze tracking: how long the picture sat still, worst case.
+    std::int64_t freezeStartedUs_=0,longestFreezeUs_=0,totalFrozenUs_=0;
+    std::uint64_t latePresentations_=0; // frozen past the grace window: show late rather than hold
     std::int64_t freezeCount_=0;std::int64_t lockWaitTotalUs_=0,lockWaitMaxUs_=0;
     bool shownUntimed_=false;
     std::int64_t paintMaxUs_=0,paintTotalUs_=0,paintCount_=0;

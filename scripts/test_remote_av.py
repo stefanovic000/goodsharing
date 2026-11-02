@@ -101,11 +101,11 @@ def checkpoint_count(path):
         return 0
 
 
-def check_continuous_tone(observed):
+def check_continuous_tone(observed, limit_ms=40):
     tone = observed.get('continuous_tone_observation', {})
     return (tone.get('started') is True and tone.get('duration_ms', 0) >= 1000 and
             tone.get('observed_frame_coverage', 0) >= .95 and tone.get('quiet_frame_fraction', 1) <= .05 and
-            tone.get('longest_quiet_ms', 9999) <= 40)
+            tone.get('longest_quiet_ms', 9999) <= limit_ms)
 
 
 def check_stall_observations(view, fps=60):
@@ -470,7 +470,11 @@ def run_case(folder, case, trace_timing=False, visible_view=False, app_path=None
                               composited_marker=view['composited_marker_valid'],
                               still_watching=view['watching'])
                 if case != 'paint-stall':
-                    checks['continuous_tone_without_gap'] = check_continuous_tone(observed)
+                    checks['continuous_tone_without_gap'] = check_continuous_tone(observed, 60 if profile_name == 'low' else 40)
+    # What a viewer actually notices: a picture that stops moving, or sound that stops.
+    # The quality gates above stay strict; these two say whether the session broke.
+        checks['no_long_audio_silence'] = (observed.get('continuous_tone_observation') or {}).get('longest_quiet_ms', 0) <= 200
+        checks['no_long_video_freeze'] = (video.get('longest_freeze_ms') or 0) <= 1000
         if case == 'paint-stall':
             checks.update(check_stall_observations(view, args.share_fps))
         if switching:

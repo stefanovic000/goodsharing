@@ -172,6 +172,16 @@ bool RemoteVideo::changed() {
         const auto now=localUs();
         while(pendingCount_&&(!watch||!admit(watch,[]{})||(!pending_[pendingHead_].untimed&&!timing_.valid(pending_[pendingHead_].ticket))||now-pending_[pendingHead_].ticket.deadlineUs>80000)){popPending();expired_++;dirty_=true;}
         if(!image_.isNull()&&(!watch||!admit(watch,[]{})||(!shownUntimed_&&(!shownTicket_||!timing_.valid(*shownTicket_))))){image_={};shownTicket_.reset();expired_++;dirty_=true;}
+        // Degrade rather than freeze: once the picture has held for half a second the
+        // A/V sync this drop policy protects is already lost, so present the newest
+        // pending picture late instead of leaving a still frame on screen.
+        static const std::int64_t freezeGraceUs=[](const char* v){return v?static_cast<std::int64_t>(std::atol(v))*1000:200000;} (std::getenv("GOODSHARING_TEST_FREEZE_GRACE_MS"));
+        if(pendingCount_&&lastPresentationUs_&&now-lastPresentationUs_>freezeGraceUs&&watch&&admit(watch,[]{})){
+            auto& next=pending_[pendingHead_];
+            if(next.untimed||timing_.valid(next.ticket)){
+                image_=std::move(next.image);shownTicket_=next.ticket;shownUntimed_=true;received_=next.received;
+                selectedRevision_=next.revision;selectedSourceFrameId_=next.sourceFrameId;++latePresentations_;popPending();dirty_=true;}
+        }
         const bool due=pendingCount_&&pending_[pendingHead_].ticket.deadlineUs<=now;
         const bool result=dirty_||due;dirty_=false;return result;
     }
@@ -201,11 +211,12 @@ bool RemoteVideo::preparePaint(const QRectF& bounds,std::shared_ptr<RemoteShare>
     if(drawnRevision_!=selected&&Clock::now()-received_>lifetime)expired_++;
     distinct=drawnRevision_!=selected;
     {
-        const auto ageMs=std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now()-received_).count();
-        if(!distinct&&ageMs>150&&!frozenNotified_){
-            frozenNotified_=true;++freezeCount_;
-            if(logger_)logger_(QString("video freeze: no new picture for %1 ms (queued=%2)").arg(ageMs).arg(pendingCount_));
+        const auto gapMs=lastPresentationUs_?(localUs()-lastPresentationUs_)/1000:0;
+        if(!distinct&&lastPresentationUs_&&gapMs>150&&!frozenNotified_){
+            frozenNotified_=true;++freezeCount_;freezeStartedUs_=localUs();
+            if(logger_)logger_(QString("video freeze: no new picture for %1 ms (queued=%2)").arg(gapMs).arg(pendingCount_));
         }else if(distinct&&frozenNotified_){frozenNotified_=false;
+            if(freezeStartedUs_){const auto frozen=localUs()-lastPresentationUs_;if(frozen>0){longestFreezeUs_=std::max(longestFreezeUs_,frozen);totalFrozenUs_+=frozen;}freezeStartedUs_=0;}
             if(logger_)logger_("video resumed after freeze");}
     }image=image_;
     QSizeF fitted=image_.size();fitted.scale(bounds.size(),Qt::KeepAspectRatio);
@@ -296,7 +307,7 @@ QJsonObject RemoteVideo::report()const {
     std::lock_guard lock(mutex_);auto late=lateness_;std::sort(late.begin(),late.begin()+latenessCount_);
     std::array<std::int64_t,512> residence=residence_;std::sort(residence.begin(),residence.begin()+residenceCount_);
     const auto residencePct=[&](std::size_t pct){return residenceCount_?residence[(residenceCount_-1)*pct/100]/1000.0:0;};
-    QJsonObject result{{"ingress_lock_wait_avg_ms",lockWaitCount_?double(lockWaitTotalUs_)/lockWaitCount_/1000.0:0.0},{"ingress_lock_wait_max_ms",lockWaitMaxUs_/1000.0},{"submitted_frames",static_cast<double>(submittedFrames_)},{"paint_residence_p50_ms",residencePct(50)},{"paint_residence_p95_ms",residencePct(95)},{"paint_residence_max_ms",maximumResidenceUs_/1000.0},{"paint_residence_samples",static_cast<double>(residenceCount_)},{"impairment_drops",static_cast<double>(impairmentDrops_)},{"pending_drops",static_cast<double>(pendingDrops_)},{"admitted_frames",static_cast<double>(admitted_)},{"invalid_frames",static_cast<double>(invalid_)},{"denied_frames_or_draws",static_cast<double>(denied_)},{"drawn_distinct_frames",static_cast<double>(drawn_)},{"expired_or_revoked_images",static_cast<double>(expired_)},{"pending_images",static_cast<int>(pendingCount_)+(image_.isNull()?0:1)},{"last_draw_visible",visible_},{"maximum_first_paint_residence_ms",static_cast<double>(lifetime.count())},{"held_image_without_update",!image_.isNull()&&Clock::now()-received_>lifetime},{"audio_playback_enabled",bool(timing_.schedule)},
+    QJsonObject result{{"ingress_lock_wait_avg_ms",lockWaitCount_?double(lockWaitTotalUs_)/lockWaitCount_/1000.0:0.0},{"ingress_lock_wait_max_ms",lockWaitMaxUs_/1000.0},{"submitted_frames",static_cast<double>(submittedFrames_)},{"paint_residence_p50_ms",residencePct(50)},{"paint_residence_p95_ms",residencePct(95)},{"paint_residence_max_ms",maximumResidenceUs_/1000.0},{"paint_residence_samples",static_cast<double>(residenceCount_)},{"impairment_drops",static_cast<double>(impairmentDrops_)},{"pending_drops",static_cast<double>(pendingDrops_)},{"admitted_frames",static_cast<double>(admitted_)},{"invalid_frames",static_cast<double>(invalid_)},{"denied_frames_or_draws",static_cast<double>(denied_)},{"drawn_distinct_frames",static_cast<double>(drawn_)},{"expired_or_revoked_images",static_cast<double>(expired_)},{"pending_images",static_cast<int>(pendingCount_)+(image_.isNull()?0:1)},{"last_draw_visible",visible_},{"maximum_first_paint_residence_ms",static_cast<double>(lifetime.count())},{"freeze_count",static_cast<double>(freezeCount_)},{"late_presentations",static_cast<double>(latePresentations_)},{"longest_freeze_ms",static_cast<double>(std::max(longestFreezeUs_,freezeStartedUs_&&localUs()>lastPresentationUs_?localUs()-lastPresentationUs_:0))/1000.0},{"total_frozen_ms",static_cast<double>(totalFrozenUs_)/1000.0},{"held_image_without_update",!image_.isNull()&&Clock::now()-received_>lifetime},{"audio_playback_enabled",bool(timing_.schedule)},
         {"timed_presentation",bool(timing_.schedule)},{"scheduled_queue_high_water",static_cast<int>(pendingHigh_)},{"scheduled_queue_capacity",static_cast<int>(pending_.size())},
         {"warming",warming_},{"warm_queue_high_water",static_cast<int>(warmHigh_)},{"scheduled_drops",static_cast<double>(pendingDrops_)},{"next_due_preserved_on_overflow",static_cast<double>(nextDuePreserved_)},{"unclocked_frames",static_cast<double>(unclocked_)},{"timed_draws",static_cast<double>(timedDraws_)},
         {"wait_for_frame_queue",timing_.waitForSwap},{"queued_presentations",static_cast<double>(queuedPresentations_)},{"maximum_queue_lateness_ms",maxQueueLateness_/1000.0},
