@@ -226,3 +226,25 @@ larger than any effect measured. The honest statement is that this configuration
 unstable for reasons not yet isolated, that the two changes are plausible and harmless,
 and that the next measurement should be taken on a freshly booted machine with one case
 per boot rather than hundreds of runs in a row.
+
+## Clean-machine result: the instability was the machine
+
+The measurements above were taken on a PC that had run several hundred media sessions
+without a restart. After the user restarted the machine, the same build was measured
+again from an idle state (9.5 % CPU; Windows fast startup kept the kernel session, so
+the reported uptime was still 147 h, but nothing else was running):
+
+| Measurement | Degraded machine | After restart |
+| --- | --- | --- |
+| `--case minimized --repeat 8` | 3/8 pass | **8/8 pass**, worst quiet 3.7 ms, coverage 0.999 |
+| `--case all` (17 cases) | 1-4 failures per run | **17/17** on two consecutive runs |
+
+The transport signature recorded above ("track verified, reader running, no frames on
+either stream") did not recur at all. So the earlier failures were machine state - hours
+of accumulated device-graph and process churn - rather than a defect in this code. The
+EcoQoS opt-out and the watchdog cooldown stay: both are defensible on their own, and
+neither can be shown to help or hurt from these numbers.
+
+The lesson for future measurement is the one that was written here before the restart:
+one case per boot, or at least a fresh machine, because a long run of media sessions
+degrades the host enough to move the gates.
