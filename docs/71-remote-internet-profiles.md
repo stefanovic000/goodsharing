@@ -64,3 +64,17 @@ alone no longer does.
 This is not a two-machine test: both clients share one PC's clock, uplink and
 capture path, and the project's earlier two-machine run (docs/67, 2026-10-31: 3038/3038 admitted, 2329 drawn, 0 ms quiet) predates the profiles and should be repeated with Smooth. It also does not measure glass-to-glass latency, only the receiver-side
 residence. Both remain open.
+## Re-measured after the Low buffer change (2026-11-03)
+
+Low's buffer moved from 45 to 70 ms for loopback stability, so the internet comparison
+was repeated from an idle machine:
+
+| Profile | Result | drawn | audio blocks | residence |
+| --- | --- | --- | ---: | ---: |
+| Smooth (300 ms) | pass | 444/454 | 819 | 302 ms |
+| Low (70 ms) | **fail** | 410/418 | 724 | 72 ms |
+
+Smooth is unchanged and still passes. Low now holds a 72 ms residence instead of 17 ms,
+so the timeline is being applied, but its timed presentation still collapses over the
+internet: the path's jitter exceeds what a 70 ms budget can absorb. Low remains a
+loopback/LAN profile; a remote session should use Balanced or Smooth.
