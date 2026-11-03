@@ -248,3 +248,25 @@ neither can be shown to help or hurt from these numbers.
 The lesson for future measurement is the one that was written here before the restart:
 one case per boot, or at least a fresh machine, because a long run of media sessions
 degrades the host enough to move the gates.
+
+## 60 fps is beyond this host's headroom in some sessions
+
+The same suite at `--share-fps 60` failed 7 of 17 on the clean machine, and the shape is
+performance rather than correctness:
+
+| Case | timed draws | admitted | drawn |
+| --- | ---: | ---: | ---: |
+| 720 | 683 | 1027 | 1010 |
+| 1080 | 675 | 1023 | 987 |
+| low | 697 | 1034 | 1017 |
+| smooth | **0** | **216** | 211 |
+
+The three cases that held look healthy. `smooth` admitted only 216 of roughly a thousand
+frames and never presented on the timeline at all, which is a session starved of CPU, not
+a gate set too high. That matches the known limit in the README (CPU presentation caps
+1080p60 near 50-56 fps presented) and the fact that this host is also running the
+harness, two app instances, the SFU and the encode path on one machine.
+
+So the gating suite is the 30 fps one; 60 fps is a stretch measurement on this hardware,
+and a 60 fps failure here says "this PC cannot sustain it" before it says "the code is
+wrong".
